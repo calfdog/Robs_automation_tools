@@ -1,5966 +1,2310 @@
+"""
+PAMIE Build 3.0b
+Based on cPAMIE and PAM.py by RLM
+Revised: March 03, 2009
+Developers: Robert L. Marchetti
+Description: This python class file allow you to write scripts to Automate the Internet Explorer Browser Client.
+
+
+This software is provided 'as-is', without any express or implied warranty.
+In no event will the authors be held liable for any damages arising from the use of this software.
+
+1. The origin of this software must not be misrepresented; you must not claim that you wrote the original software.
+   If you use this software in a product, an acknowledgment in the product documentation would be appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
+
+Special Thanks to: All the Pamie Users and Developers for their time and effort, Steve M., Drunk Bum, Jeff H.,
+Dave K., Henry W., Tom C., Scott W.,Margie M. and all others for there support and contributions.
+
+"""
+
+import sys
+
+sys.path.append(r'c:\python24\lib')
+
+import win32com.client
+import win32gui
+import pywintypes
+import time
+import win32con
+import pdb
+import re
+import random
+import string
+import pythoncom
+import datetime, os, sys
+import traceback
+
+
+class PAMIE:
+    """
+    cPAMIE is an automation object based on the work of PAMIE by RLM
+    http://pamie.sourceforge.net/
+    """
+    __version__ = "3.0"
+
+    def __init__(self, url=None, timeOut=3000):
+        """ The class instantiation code. When the object is instantiated you can
+        pass a starting URL. If no URL is passed then about:blank, a blank
+        page, is brought up.
+        parameters:
+            [url]     - url to navigate to initially
+            [timeOut] - how many 100mS increments to wait, 10 = 1sec, 100=10sec
+        returns:
+            Nothing
+        """
+
+        # pythoncom.CoInitialize()
+
+        self.showDebugging = True  # Show debug print lines?
+        self.colorHighlight = "#F6F7AD"  # Set to None to turn off highlighting
+        self.frameName = None  # The current frame name or index. Nested frames are
+        # supported in the format frame1.frame2.frame3
+        self.formName = None  # The current form name or index
+        self.busyTuner = 1  # Number of consecutive checks to verify document is no longer busy.
+
+        self._ie = win32com.client.dynamic.Dispatch('InternetExplorer.Application')
+        if url:
+            self._ie.Navigate(url)
+        else:
+            self._ie.Navigate('about:blank')
+
+        self._timeOut = timeOut
+        self._ie.Visible = 1
+        # self._ie.resizable = 1
+        # self._ie.fullscreen = 1
+        self._ie.MenuBar = 1
+        self._ie.ToolBar = 1
+        self._ie.AddressBar = 1
+
+        self.timer = datetime.datetime.now()
+
+    def _docGetReadyState(self, doc):
+        """ Gets the readyState of a document.  This is a seperate function so
+            the "Access Denied" error that IE throws up every once in a while can
+            be caught and ignored, without breaking the timing in the wait() functions.
+            parameters:
+                doc     - The document
+            returns:
+                The readyState.
+        """
+        try:
+            return doc.readyState
+        except:
+            return ""
+
+    def _frameWait(self, frame=None):
+        """ Waits for a page to be fully loaded. A completely soundproof method has yet to be found to accomplish
+            this, but the function works in the majority of instances. The function waits for both the doc busy attribute
+            to be False and the doc readyState to be 'complete'.  It will continue to wait until the maximim timeOut
+            value has been reached. In addition, the busyTuner can be adjusted to force the function to verify the
+            specified number of consecutive 'not busy and completed' checks before continuing.
+            parameters:
+                [frame]     - A frame element.
+            returns:
+                True if the wait was successful, else False
+        """
+        readyCount = 0
+        timeLeft = self._timeOut
+
+        try:
+            if frame:
+                myFrame = frame
+            else:
+                myFrame = self.getFrame(self.frameName)
+
+            while readyCount < self.busyTuner and timeLeft > 0:
+                try:
+                    doc = myFrame.document
+                except:
+                    continue  # if the document never gets itself together this will timeout
+
+                if self._ie.Busy == False and self._docGetReadyState(doc) == 'complete':
+                    readyCount += 1
+                else:
+                    readyCount = 0
+
+                time.sleep(0.05)
+                timeLeft -= 1
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            return False
+        else:
+            return True
+
+    def _wait(self):
+        """ Waits for a page to be fully loaded. A completely soundproof method has yet to be found to accomplish
+            this, but the function works in the majority of instances. The function waits for both the doc busy attribute
+            to be False and the doc readyState to be 'complete'.  It will continue to wait until the maximim timeOut
+            value has been reached. In addition, the busyTuner can be adjusted to force the function to verify the
+            specified number of consecutive 'not busy and completed' checks before continuing.
+            parameters:
+                None
+            returns:
+                True if the wait was successful, else False
+        """
+        readyCount = 0
+        timeLeft = self._timeOut
+
+        try:
+            while readyCount < self.busyTuner and timeLeft > 0:
+                try:
+                    doc = self._ie.Document
+                except:
+                    continue  # if the document never gets itself together this will timeout
+
+                if self._ie.Busy == False and self._docGetReadyState(doc) == 'complete':
+                    readyCount += 1
+                else:
+                    readyCount = 0
+
+                time.sleep(0.05)
+                timeLeft -= 1
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            return False
+        else:
+            return True
+
+    def buttonExists(self, name):
+        """ Checks to see if a button exists
+            parameters:
+                name   - The id, name, value or index of the button.
+            returns:
+                True if the button is found, else False
+        """
+        myElement = self.getButton(name)
+        if myElement:
+            return True
+        else:
+            return False
+
+    def changeWindow(self, wintext):
+        """  changeWindow()
+        changes control to new or existing window
+        Parms:
+            wintext - title of window to control
+        """
+        # Grab the POP-UP Window
+        newWin = self.windowFind(wintext)
+
+        # Use Pamie for COM object for POP-UP Window
+        self._ie = newWin
+        return self._ie
+
+    def checkBoxExists(self, name):
+        """ Checks to see if a checkbox exists
+            parameters:
+                name   - The id, name, or value of the button.
+            returns:
+                True if the checkbox is found, else False
+        """
+        myElement = self.getCheckBox(name)
+        if myElement:
+            return True
+        else:
+            return False
+
+    def clickButton(self, name):
+        """ Clicks a button
+            parameters:
+                name        - The id, name, value or index of the button, or a button element.
+            returns:
+                True on success, else False
+        """
+        if isinstance(name, str) or isinstance(name, int):
+            myButton = self.getButton(name)
+        else:
+            myButton = name
+
+        return self.clickElement(myButton)
+
+    def clickButtonImage(self, name):
+        """ Click a button of input type "image"
+            parameters:
+                name   - The id, name, value or index of the button, or a button element.
+            returns:
+                True on success, else False
+        """
+        if isinstance(name, str) or isinstance(name, int):
+            myElements = self.getElementsList("input", "type=image")
+            foundElement = self.findElement("input", "id;name;value", name, myElements)
+        else:
+            foundElement = name
+
+        return self.clickElement(foundElement)
+
+    def clickElement(self, element):
+        """ Clicks the passed element
+            parameters:
+                element       - the element to click
+            returns:
+                True on success, else False
+        """
+        try:
+            if not element:
+                if self.showDebugging: print("** clickElement() was not passed a valid element")
+                return False
+
+            if self.colorHighlight: element.style.backgroundColor = self.colorHighlight
+            element.focus()
+            element.blur()
+            element.click()
+            return True
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            return False
+        else:
+            return False
+
+    def clickHiddenElement(self, element):
+
+        """ Clicks the passed element
+            parameters:
+                element       - the element to click
+            returns:
+                True on success, else False
+        """
+        try:
+            if not element:
+                if self.showDebugging: print("** clickElement() was not passed a valid element")
+                return False
+
+            if self.colorHighlight: element.style.backgroundColor = self.colorHighlight
+            element.click()
+            return True
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            return False
+        else:
+            return False
+
+    def clickHiddenLink(self, name):
+        """ Clicks a hidden link.
+            parameters:
+                name   - The id or innerText of the link
+            returns:
+                True on success, else False
+        """
+        if isinstance(name, str) or isinstance(name, int):
+            myLink = self.getLink(name)
+        else:
+            myLink = name
+        return self.clickHiddenElement(myLink)
+
+    def clickImage(self, name):
+        """ Clicks an image
+            parameters:
+                name    The id, name, src or index of the image
+            returns:
+                True on success, else False
+        """
+        if isinstance(name, str) or isinstance(name, int):
+            myImage = self.getImage(name)
+        else:
+            myImage = name
+        return self.clickElement(myImage)
+
+    def clickLink(self, name):
+        """ Clicks a link.
+            parameters:
+                name   - The id or innerText of the link
+            returns:
+                True on success, else False
+        """
+        if isinstance(name, str) or isinstance(name, int):
+            myLink = self.getLink(name)
+        else:
+            myLink = name
+        return self.clickElement(myLink)
+
+    def clickMenu(self, tag, className, controlname, event=None):
+        """ Gets a div
+            parameters:
+                name   - The id, name, or index of the div
+            returns:
+                The div if found, else None
+        """
+        self._wait()
+        try:
+            doc = self._ie.Document.getElementsByTagName(tag)
+            for element in doc:
+                if element is None: break
+                if element.className == className:
+                    if element.id == name:
+                        element.style.backgroundColor = "cyan"
+                        element.FireEvent(tag, controlname, event)
+                        return True
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            return None
+
+    def closeWindow(self, title=None):
+        try:
+            self._ie.Close()
+            return True
+        except:
+            return False
+
+    def divExists(self, name):
+        """ Checks to see if a div exists
+            parameters:
+                name   - The id, name, or index of the button.
+            returns:
+                True if the div is found, else False
+        """
+        myElement = self.getDiv(name)
+        if myElement:
+            return True
+        else:
+            return False
+
+    def elementExists(self, tag, att, val):
+        """ Checks to see if an element exists.
+            parameters:
+                tag             - The HTML tag name
+                att             - The tag attribute to search for
+                val             - The attribute value to match
+            returns:
+                True if the element exists, else False
+        """
+        foundElement = self.findElement(tag, att, val)
+        if foundElement == None:
+            return False
+        else:
+            return True
+
+    def executeJavaScript(self, name):
+        """ Executes a java script function
+            parameters:
+                name  - The name of the javascript function
+            returns:
+                True on success, else False
+        """
+        self._wait()
+        try:
+            doc = self._ie.Document
+            pw = doc.parentWindow
+            script = name
+            print("script"), script
+            pw.execScript(script)
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            sys.exit(2)
+
+    def findElement(self, tag, attributes, val, elementList=None):
+        """ The main find function that hunts down an element on the page according
+            to the specified parameters.  Tries to take into account class
+            specified frames or forms.
+            parameters:
+                tag             - The HTML tag name.
+                attributes      - The semi-colon seperated tag attribute to search for.
+                val             - The attribute value to match.  Regular Expressions
+                                  can be used by starting the val with an !
+                [elementList]   - Find the element in the passed list.
+            returns:
+                The found element
+        """
+        ##        try:
+        self._wait()
+        atts = attributes.split(";")
+        regEx = False
+
+        if isinstance(val, str):
+            if val[0] == "!":
+                val = val.replace("!", "", 1)
+                myRE = re.compile(val)
+                regEx = True
+
+        if elementList:
+            if tag:
+                elements = self.getElementsList(tag, "tagName=" + tag, elementList)
+
+            if isinstance(val, int):  # Do we want the index?
+                return elements[val]
+        else:
+            elements = self.getElementsList(tag)
+
+        for el in elements[:]:
+            if regEx:
+                for att in atts[:]:
+                    valText = el.getAttribute(att)
+                    if valText != None:
+                        m = myRE.match(valText)
+                        if m:
+                            return el
+            else:
+                for att in atts[:]:
+                    valText = el.getAttribute(att)
+                    if valText != None:
+                        if isinstance(valText, str):
+                            valText = valText.strip()
+
+                        if valText == val:
+                            return el
+
+        if self.showDebugging: print("** findElement() did not find " + tag + "-" + attributes + "-" + str(val))
+        return None
+
+    def findElementByIndex(self, tag, indexNum, filter=None, elementList=None):
+        """ Find a specific element based on tag and the index number.
+            parameters:
+                tag             - The HTML tag name
+                indexNum        - The index number of the element
+                attributes      - The semi-colon seperated tag attribute to search for
+                val             - The attribute value to match
+                [elementList]   - Find the element in the passed list
+            returns:
+                The found element
+        """
+        try:
+            myElements = self.getElementsList(tag, filter=None, elementList=None)
+            return myElements[indexNum]
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            return None
+        else:
+            return None
+
+    def findText(self, text):
+        """
+            Searches for text on the Web Page
+            parameters:
+                text - text to search for
+        """
+        self._wait()
+        pageText = self.outerHTML()
+        # print pageText
+
+        # Search the doc for the text
+        text_found = pageText.find(text)
+        try:
+            # A "-1" means nothing is found
+            if text_found is not -1:
+                return True
+            else:
+                print("Text %s Not Found!" % (text))
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            return None
+
+    def fireElementEvent(self, tag, controlName, eventName):
+        """ Fire a named event for a given control
+            parameters:
+                tag         - The HTML tag name
+                controlName - the control to act on
+                eventName   - the event name to signal
+            returns:
+                True on success, else False
+        """
+        foundElement = self.findElement(tag, "name", controlName)
+        if foundElement:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            foundElement.FireEvent(eventName)
+            return True
+        else:
+            if self.showDebugging: print("fireEvent() did not find " + controlName + " control.")
+            return False
+
+    def findWindow(self, title, indexNum=1):
+        """ Finds all ie open windows returns them if title matches.
+        parameters:
+            title         - The window title to find
+            [indexNum]    - The index number of the window to find
+        returns:
+            The window if found, else None
+        """
+        thisCount = self._timeOut
+        found = False
+        while not found:
+            shellWnd = DispatchEx('Shell.Application')
+            wins = shellWnd.Windows()
+            winsCount = wins.Count
+            indexCnt = 1
+
+            time.sleep(.5)
+            thisCount = thisCount - 5
+            if thisCount < 1: break
+
+            for index in range(winsCount):
+                try:
+                    ieObj = wins.Item(index)
+                    doc = ieObj.Document
+
+                    if doc.title == title:
+                        if indexCnt == indexNum:
+                            return ieObj
+                        indexCnt += 1
+                    elif ieObj.LocationName == title:
+                        if indexCnt == indexNum:
+                            return ieObj
+                        indexCnt += 1
+                except:
+                    pass
+
+        if self.showDebugging: print("** windowFind() did not find the " + title + "-" + str(indexNum) + " window.")
+        return None
+
+    def formExists(self, name):
+        """ Checks to see if a form exists
+            parameters:
+                None
+            returns:
+                True if the form is found, else False
+        """
+        myElement = self.getForm(name)
+        if myElement:
+            return True
+        else:
+            return False
+
+    def frameExists(self, name):
+        """ Checks to see if a frame exists
+            parameters:
+                name   - The id or name of the frame
+            returns:
+                True if the frame is found, else False
+        """
+        self._wait()
+
+        try:
+            frames = self._ie.Document.frames
+            for i in range(frames.length):
+                if frames[i].name == name:
+                    return True
+            return False
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            return False
+        else:
+            return False
+
+    def getBodyValue(self, attribute):
+        """ Gets the value of an attribute on the document.
+            parameters:
+                attribute   - The name of the attribute to get the value for
+            returns:
+                The value of the attribute
+            examples:
+                val = getBodyValue("id")
+        """
+        self._wait()
+        if self.frameName:
+            myDoc = self._ie.Document.frames[self.frameName].Document.body
+        else:
+            myDoc = self._ie.Document.body
+
+        return self.getElementValue(myDoc, attribute)
+
+    def getButton(self, name):
+        """ Gets a button
+            parameters:
+                name   - The id, name, value or index of the button.
+            returns:
+                The button if found, else None
+        """
+        myElements = self.getElementsList("input", "type=submit;type=button")
+
+        if isinstance(name, int):
+            foundElement = self.findElementByIndex("input", name, None, myElements)
+        else:
+            foundElement = self.findElement("input", "id;name;value", name, myElements)
+
+        if foundElement == None:
+            if self.showDebugging: print("** getButton() did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            return foundElement
+
+    def getButtonValue(self, name, attribute):
+        """ Gets the value of an attribute on a button
+            parameters:
+                name        - The id, name, value or index of the button, or a button element.
+                attribute   - The name of the attribute to get the value for
+            returns:
+                The value of the attribute
+        """
+        if isinstance(name, str) or isinstance(name, int):
+            foundElement = self.getButton(name)
+        else:
+            foundElement = name
+
+        if foundElement == None:
+            if self.showDebugging: print("** getButtonValue() did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            return self.getElementValue(foundElement, attribute)
+
+    def getButtons(self, filter=None):
+        """ Gets all the buttons
+            parameters:
+                [filter]    - Get only buttons specified by the filter
+            returns:
+                A list of buttons
+        """
+        if filter:
+            filter = "type=submit;" + filter
+        else:
+            filter = "type=submit"
+        return self.getElementsList("input", filter)
+
+    def getButtonsValue(self, attribute, filter=None):
+        """ Gets a list of values for the specified attribute
+            parameters:
+                attribute   - The name of the attribute to get the value for
+                [filter]    - Get only buttons specified by the filter
+            returns:
+                A list of the specified value of the attribute
+        """
+        myValues = []
+        myButtons = self.getButtons()
+        for button in myButtons[:]:
+            myValues.append(button.getAttribute(attribute))
+        return myValues
+
+    def getCheckBox(self, name):
+        """ Gets a checkbox
+            parameters:
+                name   - The id, name, or value of the checkbox.
+            returns:
+                The checkbox if found, else None
+        """
+        myElements = self.getElementsList("input", "type=checkbox")
+        foundElement = self.findElement("input", "id;name;value", name, myElements)
+        if foundElement == None:
+            if self.showDebugging: print("** getCheckBox() did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            return foundElement
+
+    def getCheckBoxValue(self, name, attribute):
+        """ Gets a checkbox
+            parameters:
+                name        - The id, name, or value of the checkbox, or a checkbox element.
+                attribute   - The name of the attribute to get the value for
+            returns:
+                The checkbox if found, else None
+        """
+        if isinstance(name, str) or isinstance(name, int):
+            foundElement = self.getCheckBox(name)
+        else:
+            foundElement = name
+
+        if foundElement == None:
+            if self.showDebugging: print("** getCheckBoxValue() did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            return self.getElementValue(foundElement, attribute)
+
+    def getCheckBoxes(self, filter=None):
+        """ Gets all the checkboxes
+            parameters:
+                [filter]    - Get only checkboxes specified by the filter
+            returns:
+                A list of checkboxes
+        """
+        if filter:
+            filter = "type=checkbox;" + filter
+        else:
+            filter = "type=checkbox"
+        return self.getElementsList("input", filter)
+
+    def getCheckBoxesChecked(self, name):
+        """ Gets a list of checked checkbox values for a specified checkbox name
+            parameters:
+                name - checkbox name
+            returns:
+                A list of checked values for the checkbox group
+        """
+        return self.getCheckBoxes("type=checkbox;checked=True;name=" + name)
+
+    def getCheckBoxesValue(self, attribute, filter=None):
+        """ Gets the value of an attribute for all the checkboxes
+            parameters:
+                attribute   - The name of the attribute to get the value for
+                [filter]    - Get only checkboxes specified by the filter
+            returns:
+                A list of the specified value of the attribute
+        """
+        myValues = []
+        myCheckBoxes = self.getCheckBoxes()
+        for checkbox in myCheckBoxes[:]:
+            myValues.append(checkbox.getAttribute(attribute))
+        return myValues
+
+    def getConfig(self, cfpath):
+        """ Set the config path"""
+
+        pathname = os.path.dirname(sys.argv[0])
+        pathname = os.chdir('..')
+        path = os.path.abspath(pathname)
+        path = path + cfpath
+        return path
+
+    def getCookie(self):
+        """ Gets the Cookie information for the current page
+            parameters:
+                None
+            returns:
+                The Cookie information of the current page
+        """
+        self._wait()
+        return self._ie.Document.cookie
+
+    def getDiv(self, name):
+        """ Gets a div
+            parameters:
+                name   - The id, name, or index of the div
+            returns:
+                The div if found, else None
+        """
+        if isinstance(name, int):
+            foundElement = self.findElementByIndex("div", name)
+        else:
+            foundElement = self.findElement("div", "id;name", name)
+
+        if foundElement == None:
+            if self.showDebugging: print("** getDiv() did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            return foundElement
+
+    def getDivValue(self, name, attribute):
+        """ Gets the value of an attribute on a div.
+            parameters:
+                name        - The id, name, or index of the div, or a div element.
+                attribute   - The name of the attribute to get the value for
+            returns:
+                The value of the attribute
+        """
+        if isinstance(name, str) or isinstance(name, int):
+            foundElement = self.getDiv(name)
+        else:
+            foundElement = name
+
+        if foundElement == None:
+            if self.showDebugging: print("** getDivValue() did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            return self.getElementValue(foundElement, attribute)
+
+    def getDivs(self, filter=None):
+        """ Gets a list of divs
+            parameters:
+                [filter]    - Get only buttons specified by the filter
+            returns:
+                A list of divs
+        """
+        return self.getElementsList("div", filter)
+
+    def getDivsValue(self, attribute, filter=None):
+        """ Gets a list of values for the specified attribute.
+            parameters:
+                attribute   - The name of the attribute to get the value for
+                [filter]    - Get only divs specified by the filter
+            returns:
+                A list of images
+        """
+        myValues = []
+        myDivs = self.getDivs(filter)
+        for div in myDivs[:]:
+            myValues.append(div.getAttribute(attribute))
+        return myValues
+
+    def getElementChildren(self, element, all=True):
+        """ Gets a list of children for the specified element
+            parameters:
+                element       - The element
+                elementList   - The attribute name
+                [all]         - True gets all descendants, False gets direct children only
+            returns:
+                The value of the attribute.
+        """
+        try:
+            count = 0
+            myElements = []
+            if all:
+                elements = element.all
+            else:
+                elements = element.childNodes
+
+            while count < elements.length:
+                myElements.append(elements[count])
+                count += 1
+
+            return myElements
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            return None
+        else:
+            return None
+
+    def getElementParent(self, element):
+        """ Gets the parent of the passed element.
+            parameters:
+                element       - The element
+            returns:
+                The parent element
+        """
+        try:
+            return element.parentElement
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            return None
+        else:
+            return None
+
+    def getElementValue(self, element, attribute):
+        """ Gets the value of the attribute from the element.
+            parameters:
+                element       - The element
+                elementList   - The attribute name
+            returns:
+                The value of the attribute.
+        """
+        try:
+            return element.getAttribute(attribute)
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            return None
+        else:
+            return None
+
+    def getElementsList(self, tag, filter=None, elementList=None):
+        """ Sets the specified attribute of any element
+            parameters:
+                tag        - The HTML tag name
+                [filter]   - Only return elements that match this filter in format
+                             (att1=val1;att2=val2), ie. "type=checkbox;checked=True"
+            returns:
+                A filtered list of the found elements
+        """
+        self._wait()
+
+        if elementList:
+            allElements = elementList
+        else:
+            if self.frameName:
+                myFrame = self.getFrame(self.frameName)
+
+                if self.formName:
+                    elements = myFrame.Document.forms[self.formName].getElementsByTagName(tag)
+                else:
+                    elements = myFrame.Document.getElementsByTagName(tag)
+            else:
+                if self.formName:
+                    elements = self._ie.Document.forms[self.formName].getElementsByTagName(tag)
+                else:
+                    elements = self._ie.Document.getElementsByTagName(tag)
+
+            # Convert the IE COM object to a list
+            count = 0
+            allElements = []
+            while count < elements.length:
+                allElements.append(elements[count])
+                count += 1
+
+        try:
+            if filter:
+                myElements = []
+                filters = filter.split(";")
+                for el in allElements:
+                    match = False
+                    for f in filters[:]:
+                        atts = f.split("=")
+                        valText = el.getAttribute(atts[0])
+                        if valText != None:
+                            valText = str(valText)
+                            valText = valText.strip()
+                            valText = valText.lower()
+                            wantText = atts[1].lower()
+                            if valText == wantText:
+                                match = True
+                    if match:
+                        myElements.append(el)
+            else:
+                myElements = allElements
+
+            return myElements
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            return None
+        else:
+            return None
+
+    def getErrorText(self, className):
+        """ Gets the Error Text
+        This is only an example you may need to tweak for you needs
+            parameters:
+                redTxtSmall   - This is the class name for the error text
+            returns:
+                The the innerText of that class, else None
+        """
+        pass
+
+    ##      EXAMPLE Below
+    ##        self._wait()
+    ##        className = className
+    ##        try:
+    ##            doc = self._ie.Document.getElementsByTagName("SPAN")
+    ##            for element in doc:
+    ##                if element is None:break
+    ##                if element.className == className :
+    ##                    element.style.backgroundColor="cyan"
+    ##                    val = element.innertext
+    ##                    # stripout any spaces
+    ##                    val = val.strip()
+    ##                    return val
+    ##        except:
+    ##            (ErrorType,ErrorValue,ErrorTB)=sys.exc_info()
+    ##            print (sys.exc_info())
+    ##            traceback.print_exc(ErrorTB)
+    ##            return None
+
+    def getForm(self, name=None):
+        """ Gets a form
+            parameters:
+                [name]    - The name, id or index of the form.
+            returns:
+                The form if found, else None
+        """
+        if name == None: name = self.formName
+        if isinstance(name, int):
+            foundElement = self.findElementByIndex("form", name)
+        else:
+            foundElement = self.findElement("form", "id;name", name)
+
+        if foundElement == None:
+            if self.showDebugging: print("** getForm() did not find " + name)
+            return None
+        else:
+            return foundElement
+
+    def getFormControlNames(self, name=None):
+        """ Gets a list of controls for a given form
+            parameters:
+                [name]   - the form name
+            returns:
+                a list of control names located in the form
+        """
+        if name == None: name = self.formName
+        self._wait()
+        d = []
+        if self.frameName:
+            self._frameWait()
+            thisForm = self._ie.Document.frames[self.frameName].Document.forms[self.formName]
+        else:
+            thisForm = self._ie.Document.forms[self.formName]
+        if thisForm != None:
+            for control in thisForm:
+                if control == None: break  # Some browser bug
+                d.append(control.name)
+        return d
+
+    def getFormValue(self, name, attribute):
+        """ Gets the value of an attribute on a form
+            parameters:
+                name        - The id, name or index of the form, or a form element.
+                attribute   - The name of the attribute to get the value for
+            returns:
+                The value of the attribute
+        """
+        if name == None: name = self.formName
+        if isinstance(name, str) or isinstance(name, int):
+            foundElement = self.getForm(name)
+        else:
+            foundElement = name
+
+        if foundElement == None:
+            if self.showDebugging: print("** getFormValue() did not find " + name)
+            return None
+        else:
+            return self.getElementValue(foundElement, attribute)
+
+    def getFormVisibleControlNames(self, name=None):
+        """ Gets a list of controls for a given form
+            parameters:
+                [name]   - the form name
+            returns:
+                a list of visible control names located in the form
+        """
+        if name == None: name = self.formName
+        self._wait()
+        d = []
+        if self.frameName:
+            thisForm = self._ie.Document.frames[self.frameName].Document.forms[self.formName]
+        else:
+            thisForm = self._ie.Document.forms[self.formName]
+        if thisForm != None:
+            for control in thisForm:
+                if control == None: break  # some browser bug
+                if control.type != 'hidden':
+                    if control.id == None or control.id == '':
+                        d.append(control.name)
+                    else:
+                        d.append(control.id)
+        return d
+
+    def getForms(self, filter=None):
+        """ Gets a list of forms
+            parameters:
+                [filter]    - Get only buttons specified by the filter
+            returns:
+                A list of forms
+        """
+        return self.getElementsList("form", filter)
+
+    def getFormsValue(self, attribute, filter=None):
+        """ Use this to get the form object names on the page
+            parameters:
+                attribute   - The name of the attribute to get the value for
+                [filter]    - Get only forms specified by the filter
+            returns:
+                a list of form names
+        """
+        myValues = []
+        myForms = self.getForms(filter)
+        for form in myForms[:]:
+            myValues.append(form.getAttribute(attribute))
+        return myValues
+
+    def getFrame(self, name):
+        """ Gets a a frame
+            parameters:
+                name  - The name or index of the frame
+            returns:
+                a frame element
+        """
+        self._wait()
+        frames = self._ie.Document.frames
+        destFrames = name.split(".")
+
+        if isinstance(name, int):
+            return frames[name]
+        else:
+            j = 0
+            for destFrame in destFrames:
+                j += 1
+                for i in range(frames.length):
+                    fName = frames[i].name
+                    if fName == destFrame:
+                        if j == len(destFrames):
+                            myFrame = frames[i]
+                            self._frameWait(myFrame)
+                            return myFrame
+                        else:
+                            frames = frames[i].document.frames
+            return None
+
+    def getFrameValue(self, name, attribute):
+        """ Gets the value of an attribute on a frame
+            parameters:
+                name        - The name of the frame
+                attribute   - The name of the attribute to get the value for
+            returns:
+                The value of the attribute
+        """
+        foundElement = self.getFrame(name)
+        if foundElement == None:
+            if self.showDebugging: print("** getFrameValue() did not find " + name)
+            return None
+        else:
+            return foundElement.name  # can't call getElementValue() here
+
+    def getFramesValue(self):
+        """ Gets the value of an attribute on a frame
+            parameters:
+                none
+            returns:
+                The list of frame values
+        """
+        self._wait()
+        l = []
+        frames = self._ie.Document.frames
+        for i in range(frames.length):
+            l.append(frames[i].name)  # can't call getAttribute() here
+        return l
+
+    def getIE(self):
+        """ Get the current IE Application
+            parameters:
+                None
+            returns:
+                The current IE document
+        """
+        return self._ie
+
+    def getImage(self, name):
+        """ Gets an image
+            parameters:
+                name  - The id, name, src or index of the image
+            returns:
+                an image
+        """
+        if isinstance(name, int):
+            foundElement = self.findElementByIndex("img", name)
+        else:
+            foundElement = self.findElement("img", "id;name;nameProp;src", name)
+
+        if foundElement == None:
+            if self.showDebugging: print("** getImage() did not find " + str(name))
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            return foundElement
+
+    def getImageValue(self, name, attribute):
+        """ Gets the value of an attribute on a image
+            parameters:
+                name        - The id, name, value or index of the image, or image element.
+                attribute   - The name of the attribute to get the value for
+            returns:
+                The value of the attribute
+        """
+        if isinstance(name, str) or isinstance(name, int):
+            foundElement = self.getImage(name)
+        else:
+            foundElement = name
+
+        if foundElement == None:
+            if self.showDebugging: print("** getImageValue() did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            return self.getElementValue(foundElement, attribute)
+
+    def getImages(self, filter=None):
+        """ Gets a list of images
+            parameters:
+                [filter]    - Get only buttons specified by the filter
+            returns:
+                A list of images
+        """
+        return self.getElementsList("img", filter)
+
+    def getImagesValue(self, attribute, filter=None):
+        """ Gets a list of the specified value for the images
+            parameters:
+                attribute   - The name of the attribute to get the value for
+                [filter]    - Get only images specified by the filter
+            returns:
+                A list of image values.
+        """
+        myValues = []
+        myImages = self.getImages(filter)
+        for image in myImages[:]:
+            myValues.append(image.getAttribute(attribute))
+        return myValues
+
+    def getInputElements(self, filter=None):
+        """ Get all the input elements
+            parameters:
+                [filter]    - Get only buttons specified by the filter
+            returns:
+                A list of input elements
+        """
+        return self.getElementsList("input", filter)
+
+    def getLink(self, name):
+        """ Gets a link
+            parameters:
+                name  - The id, innerText or index of the link
+            returns:
+                an image
+        """
+        if isinstance(name, int):
+            foundElement = self.findElementByIndex("a", name)
+        else:
+            foundElement = self.findElement("a", "id;innerText", name)
+
+        if foundElement == None:
+            if self.showDebugging: print("** getLink() did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            return foundElement
+
+    def getLinkValue(self, name, attribute):
+        """ Gets the value of an attribute on a link
+            parameters:
+                name        - The id, innerText or index of the link, or a link element.
+                attribute   - The name of the attribute to get the value for
+            returns:
+                The value of the attribute
+        """
+        if isinstance(name, str) or isinstance(name, int):
+            foundElement = self.getLink(name)
+        else:
+            foundElement = name
+
+        if foundElement == None:
+            if self.showDebugging: print("** getLinkValue() did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            return self.getElementValue(foundElement, attribute)
+
+    def getLinks(self, filter=None):
+        """ Gets a list of links
+            parameters:
+                [filter]    - Get only links specified by the filter
+            returns:
+                A list of links
+        """
+        return self.getElementsList("a", filter)
+
+    def getLinksValue(self, attribute, filter=None):
+        """ Gets a list of the specified value for the links
+            parameters:
+                attribute   - The name of the attribute to get the value for
+                [filter]    - Get only links specified by the filter
+            returns:
+                A list of link values.
+        """
+        myValues = []
+        myLinks = self.getLinks(filter)
+        for link in myLinks[:]:
+            myValues.append(link.getAttribute(attribute))
+        return myValues
+
+    def getListBox(self, name):
+        """ Gets a list box.
+            parameters:
+                name    - The name or index of the listbox
+            returns:
+                A list box
+        """
+        if isinstance(name, int):
+            foundElement = self.findElementByIndex("select", name)
+        else:
+            foundElement = self.findElement("select", "name;id", name)
+
+        if foundElement == None:
+            if self.showDebugging: print("** getListBox() did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            return foundElement
+
+    def getListBoxItemCount(self, name):
+        """ Gets a count of selected options associated with a listbox.
+            parameters:
+                The name or id of the list box
+            returns:
+                The selected text
+        """
+        foundElement = self.findElement("select", "name;id", name)
+        if foundElement == None:
+            if self.showDebugging: print("** getListBoxSelected() did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            myValues = []
+
+            myElements = foundElement.options
+            count = 0
+            while count < myElements.length:
+                count += 1
+            return count
+
+    def getListBoxOptions(self, name):
+        """ Gets the list of options associated with a listbox.
+            parameters:
+                The name or id of the list box
+            returns:
+                A list of options
+        """
+        foundElement = self.findElement("select", "name;id", name)
+        if foundElement == None:
+            if self.showDebugging: print("** getListBoxOptions() did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            myValues = []
+            count = 0
+            myElements = foundElement.options
+            while count < myElements.length:
+                myValues.append(myElements[count].innerText)
+                count += 1
+            return myValues
+
+    def getListBoxSelected(self, name):
+        """ Gets the list of selected options associated with a listbox.
+            parameters:
+                The name or id of the list box
+            returns:
+                The selected text
+        """
+        foundElement = self.findElement("select", "name;id", name)
+        if foundElement == None:
+            if self.showDebugging: print("** getListBoxSelected() did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            myValues = []
+
+            myElements = foundElement.options
+            count = 0
+            while count < myElements.length:
+                if myElements[count].selected:
+                    myValues.append(myElements[count].innerText)
+                count += 1
+            return myValues
+
+    def getListBoxValue(self, name, attribute):
+        """ Gets the value of an attribute on a listbox
+            parameters:
+                name        - The id, innerText or index of the listbox, or a listbox element.
+                attribute   - The name of the attribute to get the value for
+            returns:
+                The value of the attribute
+        """
+        if isinstance(name, str) or isinstance(name, int):
+            foundElement = self.getListBox(name)
+        else:
+            foundElement = name
+
+        if foundElement == None:
+            if self.showDebugging: print("** getListBoxValue() did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            return self.getElementValue(foundElement, attribute)
+
+    def getPageText(self):
+        """ Gets the URL, Title and outerHTML
+            parameters:
+                None
+            returns:
+                a string consisting of:
+                URL,
+                Title
+                Body block
+            as a string. Unfortunately, IE doesn't give a workable solution to
+            saving the complete source so this is as good as it gets until
+            someone brighter comes along.  This is useful if you want to compare
+            against a previous run for QCing purposes.
+        """
+        self._wait()
+        if self.frameName:
+            return '%s\n%s\n%s' % (self._ie.LocationURL,
+                                   self._ie.LocationName,
+                                   self._ie.Document.frames[self.frameName].document.body.outerHTML)
+        else:
+            return '%s\n%s\n%s' % (self._ie.LocationURL,
+                                   self._ie.LocationName,
+                                   self._ie.Document.body.outerHTML)
+
+    def getRadioButton(self, name):
+        """ Gets a radio button by the name.  If there are multiple radio buttons
+            with the same name, the first one found is returned.
+            parameters:
+                name - radio button group name or index
+            returns:
+                a list values for the group
+        """
+        myElements = self.getElementsList("input", "type=radio")
+        if isinstance(name, int):
+            foundElement = self.findElementByIndex("input", name, None, myElements)
+        else:
+            foundElement = self.findElement("input", "name", name, myElements)
+
+        if foundElement == None:
+            if self.showDebugging: print("** getRadioButton() did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            return foundElement
+
+    def getRadioButtonSelected(self, name):
+        """ Gets a list of selected radio button values for a Radio Button group
+            parameters:
+                name - radio button group name
+            returns:
+                a list of selected buttons from the group
+        """
+        myValues = []
+        myElements = self.getElementsList("input", "type=radio;checked=True;name=" + name)
+        for el in myElements[:]:
+            myValues.append(el.value)
+        return myValues
+
+    def getRadioButtonValues(self, name):
+        """ Gets a list of selected radio button values for a Radio Button group
+            parameters:
+                name - radio button group name
+            returns:
+                a list of selected buttons from the group
+        """
+        myValues = []
+        myElements = self.getElementsList("input", "type=radio;checked=False;name=" + name)
+        for el in myElements[:]:
+            myValues.append(el.value)
+        return myValues
+
+    def getRadioButtons(self, filter=None):
+        """ Gets all the radio buttons
+            parameters:
+                [filter]    - Get only radio buttons specified by the filter
+            returns:
+                A list of checkboxes
+        """
+        if filter:
+            filter = "type=radio;" + filter
+        else:
+            filter = "type=radio"
+        return self.getElementsList("input", filter)
+
+    def getTable(self, name):
+        """ Gets a table
+            parameters:
+                name  - The id or name of the table
+            returns:
+                a table
+        """
+        if isinstance(name, int):
+            foundElement = self.findElementByIndex("table", name, name)
+        else:
+            foundElement = self.findElement("table", "id;name", name)
+
+        if foundElement == None:
+            if self.showDebugging: print("** getTable() did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            return foundElement
+
+    def getTableData(self, name):
+        """ Gets the data from a table
+            parameters:
+                name  - The id, name or index of the table, or a table element.
+            returns:
+                a string containing all the table data
+        """
+        if isinstance(name, str) or isinstance(name, int):
+            myTable = self.getTable(name)
+        else:
+            myTable = name
+
+        myCells = myTable.cells
+
+        try:
+            myData = ""
+            lastIndex = -1
+            for myCell in myCells:
+                if myCell.cellIndex <= lastIndex: myData += "\n"
+                myData += str(myCell.innerText.strip()) + " "
+                lastIndex = myCell.cellIndex
+            return myData
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            return None
+        else:
+            return None
+
+    def getTableRowIndex(self, name, row):
+        """ Gets the index of a row in a table.
+            parameters:
+                Name        - The id, name or index of the table
+                row[]       - The row to search for. Use * to ignore cell.
+            returns:
+                index of the row if found
+        """
+        if isinstance(name, str) or isinstance(name, int):
+            myTable = self.getTable(name)
+        else:
+            myTable = name
+        myCells = myTable.cells
+
+        try:
+            myData = ""
+            colIndex = 0
+            cIndex = -1
+            matches = True
+            rowIndex = 0
+
+            for myCell in myCells:
+                if myCell.cellIndex <= cIndex:
+                    if matches == True:
+                        return rowIndex
+                    else:
+                        matches = True
+                        rowIndex += 1
+                    colIndex = 0
+
+                if row[colIndex] != "*":
+                    foundVal = myCell.innerText.strip()
+                    if foundVal != row[colIndex]:
+                        matches = False
+
+                cIndex = myCell.cellIndex
+                colIndex += 1
+            return matches
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            return None
+        else:
+            return None
+
+    def getTableText(self, tableName, rownum, cellnum, frameName=None):
+        """ getTableData - returns data from a cell in a table
+            parms:
+                tableName - name of table
+                rownum - row number
+                cellnum - cell number
+
+        """
+        self._wait()
+        table = self._ie.Document.getElementsByTagName('table')
+
+        if table.length > 0:
+
+            table[tableName].rows[rownum].cells[cellnum].style.backgroundColor = 'cyan'
+            data = table[tableName].rows[rownum].cells[cellnum].innerText
+            # print "Here:",data
+            data = data.strip()  # strip off any spaces
+            return data
+            # except: print "Failed not get the text from the Cell"
+        else:
+            print("No Table Found")
+
+    def getTables(self, filter=None):
+        """ Gets a list of tables
+            parameters:
+                [filter]    - Get only tables specified by the filter
+            returns:
+                A list of tables
+        """
+        return self.getElementsList("table", filter)
+
+    def getTextArea(self, name):
+        """ Gets a text area.
+            parameters:
+                name    - The name, id or index of the textarea
+            returns:
+                The text area if found.
+        """
+        if isinstance(name, int):
+            foundElement = self.findElementByIndex("textarea", name)
+        else:
+            foundElement = self.findElement("textarea", "name;id", name)
+
+        if foundElement == None:
+            if self.showDebugging: print("** getTextArea () did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            return foundElement
+
+    def getTextAreaValue(self, name, attribute):
+        """ Gets the value of an attribute on a textarea
+            parameters:
+                name        - The id, name or index of the textarea, or a textarea element.
+                attribute   - The name of the attribute to get the value for
+            returns:
+                The value of the attribute
+        """
+        if isinstance(name, str) or isinstance(name, int):
+            foundElement = self.getTextArea(name)
+        else:
+            foundElement = name
+
+        if foundElement == None:
+            if self.showDebugging: print("** getTextArea Value() did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            return self.getElementValue(foundElement, attribute)
+
+    def getTextAreas(self, filter=None):
+        """ Gets a list of textareas
+            parameters:
+                [filter]    - Get only textareas specified by the filter
+            returns:
+                A list of textareas
+        """
+        return self.getElementsList("textarea")
+
+    def getTextAreasValue(self, attribute, filter=None):
+        """ Gets a list of the specified value for the textareas
+            parameters:
+                attribute   - The name of the attribute to get the value for
+                [filter]    - Get only textareas specified by the filter
+            returns:
+                A list of link values.
+        """
+        myValues = []
+        myAreas = self.getTextAreas(filter)
+        for area in myAreas[:]:
+            myValues.append(area.getAttribute(attribute))
+        return myValues
+
+    def getTextBox(self, name):
+        """ Gets a text box.
+            parameters:
+                name    - The name, id or index of the textbox
+            returns:
+                The text area if found.
+        """
+        if isinstance(name, int):
+            foundElement = self.findElementByIndex("input", name)
+        else:
+            foundElement = self.findElement("input", "id;name;value", name)
+
+        if foundElement == None:
+            if self.showDebugging: print("** getTextBox () did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            return foundElement
+
+    def getTextBoxValue(self, name, attribute):
+        """ Gets the value of an attribute on a textbox
+            parameters:
+                name        - The id, name or index of the textbox, or a textbox element
+                attribute   - The name of the attribute to get the value for
+            returns:
+                The value of the attribute
+        """
+        if isinstance(name, str) or isinstance(name, int):
+            foundElement = self.getTextBox(name)
+        else:
+            foundElement = name
+
+        if foundElement == None:
+            if self.showDebugging: print("** getTextBox Value() did not find " + name)
+            return None
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            return self.getElementValue(foundElement, attribute)
+
+    def getTextBoxes(self, filter=None):
+        """ Gets all the textboxes
+            parameters:
+                [filter]    - Get only textboxes specified by the filter
+            returns:
+                A list of textboxes
+        """
+        if filter:
+            filter = "type=text;" + filter
+        else:
+            filter = "type=text"
+        return self.getElementsList("input", filter)
+
+    def getTextBoxesValue(self, attribute, filter=None):
+        """ Gets a list of values for the specified attribute
+            parameters:
+                attribute   - The name of the attribute to get the value for
+                [filter]    - Get only textboxes specified by the filter
+            returns:
+                A list of the specified value of the attribute
+        """
+        myValues = []
+        myBoxes = self.getTextBoxes()
+        for box in myBoxes[:]:
+            myValues.append(box.getAttribute(attribute))
+        return myValues
+
+    def goBack(self):
+        """
+            Navigates backward one item in the history list
+        """
+        self._wait()
+        self._ie.GoBack()
+
+    def imageExists(self, name):
+        """ Checks to see if a image exists in the HTML document.  It does not
+            check to see if the image actually exists on the server.
+            parameters:
+                name   - The id, name, src or index of the image.
+            returns:
+                True if the image is found, else False
+        """
+        myElement = self.getImage(name)
+        if myElement:
+            return True
+        else:
+            return False
+
+    def linkExists(self, name):
+        """ Checks to see if a link exists
+            parameters:
+                name   - The id or innerText of the link.
+            returns:
+                True if the link is found, else False
+        """
+        myElement = self.getLink(name)
+        if myElement:
+            return True
+        else:
+            return False
+
+    def listBoxUnSelect(self, name, value):
+        """ Selects an item in a list box.
+            parameters:
+                name    - The name or id of the listbox
+                value   - The value of the item to select in the list
+            returns:
+                True on success, else False
+        """
+        self._wait()
+        foundElement = self.findElement("select", "name;id", name)
+        if foundElement == None:
+            if self.showDebugging: print("** selectListBox() did not find " + name + "-" + str(value))
+            return False
+        else:
+            for el in foundElement:
+                if el.text == value:
+                    if self.colorHighlight: el.style.backgroundColor = self.colorHighlight
+                    el.selected = False
+                    # foundElement.FireEvent("onChange")
+                    bResult = True
+            return True
+
+    def locationName(self):
+        """ Gets the location name of the current page. If the resource is an HTML page on the World Wide Web, the name is the title of that page.
+            If the resource is a folder or file on the network or local computer, the name is the
+            full path of the folder or file in Universal Naming Convention (UNC) format.
+
+            **NOTE** If you have "Hide extensions for known file types" enabled, then of course that is not
+            returned.
+            parameters:
+                None
+            returns:
+                The name of the location
+        """
+
+        self._wait()
+        return self._ie.LocationName
+
+    def locationURL(self):
+        """ Gets the URL of the current page
+            parameters:
+                None
+            returns:
+                The URL of the page
+        """
+        self._wait()
+        return self._ie.LocationURL
+
+    def navigate(self, url):
+        """ Go to the specified URL.
+            parameters:
+                url - URL to navigate to
+            returns:
+                True on success, else False
+        """
+        try:
+            self._wait()
+            self._ie.Navigate(url)
+            return True
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            return False
+
+    def outerHTML(self):
+        """ Gets the  outerHTML
+            parameters:
+                None
+            returns:
+                a string consisting of:
+                Body block as a string.
+        """
+        self._wait()
+
+        if self.frameName:
+            return '%s' % (self._ie.Document.frames[self.frameName].document.body.outerHTML)
+        else:
+            return '%s' % (self._ie.Document.body.outerHTML)
+
+    def pause(self, string="Click to Continue test"):
+        """ Wait for the user to click a button to continue testing.
+            parameters:
+                [string]  = Message to display to user
+            returns:
+                None
+        """
+        self._wait()
+        try:
+            win32gui.MessageBox(0, string, "Pausing test...", 0)
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+        else:
+            return True
+
+    def quit(self):
+        """ Quit the IE browser and close it.
+            parameters:
+                None
+            returns:
+                True on success, else False
+        """
+        self._wait()
+        try:
+            self._ie.Quit()
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            return False
+        else:
+            return True
+
+    def randomDigits(self, length):
+        """ Creates a string of random digits.
+            parameters:
+                length  - The length of the number to be created
+            returns:
+                The string of random digits
+        """
+        a = "".join([random.choice(string.digits) for _ in range(length)])
+        count = a.count(a)
+        count = 0
+        while count <= length:
+            return ''.join(a)
+
+    def randomString(self, length):
+        """ Creates a string of random upper and lower case characters
+            parameters:
+                length  - The length of the string to be created
+            returns:
+                The string of random characters
+        """
+        a = "".join([random.choice(string.letters) for _ in range(length)])
+        count = a.count(a)
+        count = 0
+        while count <= length:
+            return ''.join(a)
+
+    def refresh(self):
+        """ Refresh the current page in the broswer
+            parameters:
+                None
+            returns:
+                True on success, else False
+        """
+        self._wait()
+        try:
+            self._ie.Refresh()
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            return False
+        else:
+            return True
+
+    def resize(self, iWidth, iHeight):
+        "Resize the window"
+        self._ie.resizeTo(iWidth, iHeight)
+
+    def selectListBox(self, name, value):
+        """ Selects an item in a list box.
+            parameters:
+                name    - The name or id of the listbox
+                value   - The value of the item to select in the list
+            returns:
+                True on success, else False
+        """
+        self._wait()
+        foundElement = self.findElement("select", "name;id", name)
+        if foundElement == None:
+            if self.showDebugging: print("** selectListBox() did not find " + name + "-" + str(value))
+            return False
+        else:
+            for el in foundElement:
+                if el.text == value:
+                    if self.colorHighlight: el.style.backgroundColor = self.colorHighlight
+                    el.selected = True
+                    # foundElement.FireEvent("onChange")
+                    bResult = True
+            return True
+
+    def setCheckBox(self, name, value):
+        """ Sets the value of a check box.
+            parameters:
+                name   - The id, name, or value of the checkbox.
+                value  - 0 for false (not checked)
+                         1 for true (checked)
+            returns:
+                True on success, else False
+        """
+        myElements = self.getElementsList("input", "type=checkbox")
+        return self.setElement("input", "id;name;value", name, "checked", value, None, myElements)
+
+    def setElement(self, tag, att, val, setAtt, setVal, element=None, elementList=None):
+        """ Sets the specified attribute of any element
+            parameters:
+                tag             - The HTML tag name
+                att             - The tag attribute to search for
+                val             - The attribute value to match
+                setAtt          - The attribute to set
+                setVal          - The values you are setting
+                [element]       - Specify a specific element
+                [elementList]   - Find the element in the passed list
+            returns:
+                True on success, else False
+        """
+        if element:
+            foundElement = element
+        else:
+            foundElement = self.findElement(tag, att, val, elementList)
+
+        if foundElement == None:
+            if self.showDebugging: print("** setElement() did not find " + tag + "-" + att + "-" + str(val))
+            return False
+        else:
+            try:
+                if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+                foundElement.focus()
+                foundElement.blur()
+                foundElement.setAttribute(setAtt, setVal)
+                return True
+            except:
+                (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+                print(sys.exc_info())
+                traceback.print_exc(ErrorTB)
+                return False
+            else:
+                return False
+
+    def setRadioButton(self, name, value, checked=True):
+        """ Sets a Radio Button value
+            parameters:
+                name        - radio button group name
+                value       - Which item to pick by name
+                [checked]   - Check the button, True or False
+            returns:
+                True on success, else False
+        """
+        # TODO: Find way to get innerText
+        myElements = self.getElementsList("input", "type=radio;name=%s" % (name))
+        for el in myElements[:]:
+            if el.value == value:
+                if self.colorHighlight: el.style.backgroundColor = self.colorHighlight
+                el.checked = checked
+                el.FireEvent("onClick")
+                return True
+
+        if self.showDebugging: print("** setRadioButton() did not find %s" % (name))
+        return False
+
+    def setTextArea(self, name, value):
+        """ Sets the text in a textarea.
+            parameters:
+                name    - The id, name or index of the text area, or a textarea element.
+                value   - The value to set the text area to.
+            returns:
+                True on succes, else False
+        """
+        if isinstance(name, str) or isinstance(name, int):
+            foundElement = self.findElement("textarea", "name;id", name)
+        else:
+            foundElement = name
+
+        if foundElement == None:
+            if self.showDebugging: print("** setTextArea() did not find " + name + "-" + str(value))
+            return False
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            foundElement.value = value
+            return True
+
+    def setTextBox(self, name, value):
+        """ Sets the text in a text box.
+            parameters:
+                name    - The id, name or index of a textbox, or a textbox element.
+                value   - The value to set the textbox to.
+            returns:
+                True on succes, else False
+        """
+        if isinstance(name, str) or isinstance(name, int):
+            foundElement = self.getTextBox(name)
+        else:
+            foundElement = name
+
+        if foundElement == None:
+            if self.showDebugging: print("** setTextBox() did not find " + name + "-" + str(value))
+            return False
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            foundElement.value = value
+            return True
+
+    def showAllTableText(self):
+        """ verifies text in a table
+        """
+        self._wait()
+        # Get tags names table
+        table = self._ie.Document.getElementsByTagName('table')
+
+        # loop thru all the tables
+        for i in range(table.length):
+            tablecnt = 0
+            errortxt = table[i].rows[0].cells[0].innerText
+            tablecnt = i + 1
+            errortxt = errortxt.strip()
+            print("tableNum:%s and Text: %s" % (tablecnt, errortxt))
+
+    def showTableText(self, tableName, rownum, cellnum):
+        """ Print out table index and the innertext
+        """
+
+        self._wait()
+        table = self._ie.Document.getElementsByTagName('table')
+        table[tableName].rows[rownum].cells[cellnum].style.backgroundColor = 'red'
+        print(table[tableName].rows[rownum].cells[cellnum].innerText)
+
+    def showlinkByIndex(self):
+
+        links = self._ie.Document.links.length
+        for i in range(links):
+            print(i, self._ie.Document.links[i].innertext)
+
+    def startTimer(self):
+        """
+            Start time for this timer
+        """
+        self.timer = datetime.datetime.now()
+
+    def stop(self):
+        """
+            Cancels any in process navigation
+        """
+        self._wait()
+        self._ie.Stop()
+
+    def stopTimer(self):
+        """
+            Stop timer and calc the time difference
+        """
+        # Wait is very important - wait for the doc to complete
+        self._wait()
+        td = datetime.datetime.now() - self.timer
+
+        # Calc in seconds, days, and microseconds
+        # Change to seconds
+        seconds = td.seconds + td.days * 24 * 60 * 60
+
+        # return time
+        return 'Total time:%s - The time for this script to run was aprox. %s seconds' % (td, seconds)
+
+    def submitForm(self, name=None):
+        """ Submits a form. For proper testing you should submit a form as a user
+            would, such as clicking the submit button.
+            parameters:
+                [name] - name of form
+            returns:
+                True on success, else False
+        """
+        try:
+            if name == None: name = self.formName
+            foundElement = self.findElement("form", "id;name", name)
+            if foundElement:
+                foundElement.submit()
+                return True
+            else:
+                if self.showDebugging: print("** submitForm() did not find the " + name + " form")
+                return False
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            return False
+        else:
+            return True
+
+    def tableCellExists(self, tableName, cellText):
+        """ Checks to see if a cell in a table exists
+            parameters:
+                tableName   - The id, name or index of the table, or a table element.
+                cellText    - The cell text to search for
+            returns:
+                True if the table is found, else False
+        """
+        if isinstance(tableName, str) or isinstance(tableName, int):
+            myTable = self.getTable(tableName)
+        else:
+            myTable = tableName
+        myCells = myTable.cells
+
+        try:
+            myData = ""
+            for myCell in myCells:
+                if myCell.innerText.strip() == cellText:
+                    return True
+            return False
+        except:
+            (ErrorType, ErrorValue, ErrorTB) = sys.exc_info()
+            print(sys.exc_info())
+            traceback.print_exc(ErrorTB)
+            return False
+        else:
+            return False
+
+    def tableExists(self, name):
+        """ Checks to see if a table exists
+            parameters:
+                name   - The id or name of the table
+            returns:
+                True if the table is found, else False
+        """
+        myElement = self.getTable(name)
+        if myElement:
+            return True
+        else:
+            return False
+
+    def tableRowExists(self, name, row):
+        """ Checks to see if a row in a table exists
+            parameters:
+                Name        - The id, name or index of the table, or a table element.
+                row[]       - The row to search for. Use * to ignore cell.
+            returns:
+                True if the table is found, else False
+        """
+        if self.getTableRowIndex(name, row):
+            return True
+        else:
+            return False
+
+    def textAreaExists(self, name):
+        """ Checks to see if a textarea exists
+            parameters:
+                name   - The name, id or index of the textarea
+            returns:
+                True if the textarea is found, else False
+        """
+        myElement = self.getTextArea(name)
+        if myElement:
+            return True
+        else:
+            return False
+
+    def textBoxExists(self, name):
+        """ Checks to see if a textbox exists
+            parameters:
+                name   - The name or id of the textbox
+            returns:
+                True if the textbox is found, else False
+        """
+        myElement = self.getTextBox(name)
+        if myElement:
+            return True
+        else:
+            return False
+
+    def textBoxValue(self, name):
+        """ Sets the text in a text box.
+            parameters:
+                name    - The id, name or index of a textbox, or a textbox element.
+                value   - The value to set the textbox to.
+            returns:
+                True on succes, else False
+        """
+        if isinstance(name, str) or isinstance(name, int):
+            foundElement = self.getTextBox(name)
+        else:
+            foundElement = name
+
+        if foundElement == None:
+            if self.showDebugging: print("** setTextBox() did not find " + name)
+            return False
+        else:
+            if self.colorHighlight: foundElement.style.backgroundColor = self.colorHighlight
+            foundElement.value
+            return foundElement.value
+
+    def textFinder(self, text):
+        """
+            Find text on a page then highlites it. It also returns a tru/false
+        parameters:
+            text    - text to search for
+        """
+        self._wait()
+
+        rng = self._ie.Document.body.createTextRange();
+
+        if rng.findText(text.strip()) == True:
+            rng.select()
+            rng.scrollIntoView()
+            return True
+        else:
+            return False
+
+            ##  New Stuff as of Dec 2006
+
+    def writeAttrs(self):
+        """ WriteScript - Writes out a element attrs.
+
+            Parmeters:
+                frmName - form name
+                frameName - frame name defaults to none
+        """
+
+        self._wait()
+        items = ["input", "select"]
+        for i in items:
+
+            doc = self._ie.Document.getElementsByTagName(i)
+
+            for i in range(doc.length):
+                x = doc[i]
+                etype = getattr(x, "type")
+                # Check for Name, ID or value
+                name = getattr(x, "name", None)
+                id = getattr(x, "id", None)
+                value = getattr(x, "value", None)
+
+                if etype == "select-one":
+                    print("Type:%s, ID:%s, Value:%s" % (etype, name, value))
+
+                elif etype == "select-multiple":
+                    print("Type:%s, ID:%s, Value:%s" % (etype, name, value))
+
+                else:
+                    print("Type:%s, ID:%s, Value:%s" % (etype, name, value))
 
-<!DOCTYPE html>
-<!-- Server: sfs-forge-10 -->
 
 
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-<!--[if lt IE 7 ]> <html lang="en" class="no-js ie6"> <![endif]-->
-<!--[if IE 7 ]>    <html lang="en" class="no-js ie7"> <![endif]-->
-<!--[if IE 8 ]>    <html lang="en" class="no-js ie8"> <![endif]-->
-<!--[if IE 9 ]>    <html lang="en" class="no-js ie9"> <![endif]-->
-<!--[if (gt IE 9)|!(IE)]>-->
-<html lang="en" class="no-js"> <!--<![endif]-->
-<head>
-    <meta content="text/html; charset=UTF-8" http-equiv="content-type"/>
-    <title>
-  PAMIE / Code /
-  [r20]
-  /trunk/pamie3.py
-</title>
-    
-
-<meta name="viewport" content="width=1100">
-
-
-<link rel="icon" sizes="180x180" href="https://a.fsdn.com/allura/nf/1556127879/_ew_/theme/sftheme/images/sandiego/logo-180x180.png" type="image/png">
-<link rel="icon" sizes="any" href="https://a.fsdn.com/allura/nf/1556127879/_ew_/theme/sftheme/images/sandiego/svg/originals/sf-icon-orange-no_sf.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" sizes="180x180" href="https://a.fsdn.com/allura/nf/1556127879/_ew_/theme/sftheme/images/sandiego/logo-180x180.png">
-<link rel="mask-icon" href="https://a.fsdn.com/allura/nf/1556127879/_ew_/theme/sftheme/images/sandiego/svg/originals/sf-icon-orange-no_sf.svg" color="#FF6600">
-
-<!--[if lt IE 7 ]>
-  <script src="https://a.fsdn.com/allura/nf/1556127879/_ew_/theme/sftheme/js/sftheme/vendor/dd_belatedpng.js"></script>
-  <script> DD_belatedPNG.fix('img, .png_bg'); //fix any <img> or .png_bg background-images </script>
-<![endif]-->
-<link href='//fonts.googleapis.com/css?family=Lato:400,700' rel='stylesheet'>
-<script>
-if (!window.SF) { window.SF = {}; }
-SF.sandiego = false;
-SF.sandiego_chrome = true;
-SF.cdn = "https://a.fsdn.com/con";
-</script>
-    
-        <!-- ew:head_css -->
-
-    
-        <link rel="stylesheet"
-                type="text/css"
-                href="https://a.fsdn.com/allura/nf/1556127879/_ew_/_slim/css?href=allura%2Fcss%2Fforge%2Fhilite.css%3Ballura%2Fcss%2Fforge%2Ftooltipster.css"
-                >
-    
-        <link rel="stylesheet"
-                type="text/css"
-                href="https://a.fsdn.com/allura/nf/1556127879/_ew_/allura/css/font-awesome.min.css"
-                >
-    
-        <link rel="stylesheet"
-                type="text/css"
-                href="https://a.fsdn.com/allura/nf/1556127879/_ew_/theme/sftheme/css/forge.css"
-                >
-    
-        
-<!-- /ew:head_css -->
-
-    
-    
-        <!-- ew:head_js -->
-
-    
-        <script type="text/javascript" src="https://a.fsdn.com/allura/nf/1556127879/_ew_/_slim/js?href=allura%2Fjs%2Fjquery-base.js%3Btheme%2Fsftheme%2Fjs%2Fsftheme%2Fvendor%2Fpromise.polyfill.min.js%3Btheme%2Fsftheme%2Fjs%2Fsftheme%2Fcmp.js%3Btheme%2Fsftheme%2Fjs%2Fsftheme%2Fvendor%2Fmodernizr.3.3.1.custom.js%3Btheme%2Fsftheme%2Fjs%2Fsftheme%2Fshared_head.js%3Btheme%2Fsftheme%2Fjs%2Fsftheme%2Ftypescript%2Fcompliance.js"></script>
-    
-        
-<!-- /ew:head_js -->
-
-    
-
-    
-        <style type="text/css">
-            /* make URL & Project custom fields in support tickets not get hidden as much */
-.project-forge.mountpoint-site-support .view_holder .grid-4:nth-child(5),
-.project-forge.mountpoint-site-support .view_holder .grid-4:nth-child(6) {
-  overflow: visible;
-}
-        </style>
-    
-    
-    <link rel="alternate" type="application/rss+xml" title="RSS" href="/p/pamie/code/feed.rss"/>
-    <link rel="alternate" type="application/atom+xml" title="Atom" href="/p/pamie/code/feed.atom"/>
-    <style type="text/css">
-        #access_urls .btn-set {
-            
-            min-width: 14em;
-        }
-    </style>
-
-    <style>.XxMJnSInwJAqshRULnsBMXp {
-        display: none
-    }</style>
-
-    
-    
-    
-    
-
-
-<script type="text/javascript">
-    
-    (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
-            (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
-        m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
-    })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
-        ga('create', "UA-36130941-1", {cookieDomain: 'auto', 'name': 'sfnt1','sampleRate': 9});
-          
-            ga('sfnt1.set', 'dimension9', 'pamie');
-            ga('sfnt1.set', 'dimension10', 'svn');
-            
-          ga('sfnt1.set', 'dimension13', 'Logged Out');
-        ga('sfnt1.send', 'pageview');
-    
-    
-
-</script>
-    
-
-
-
-
-
-
-<script>
-    function initPiwik(){
-      var _paq = window._paq = window._paq || [];
-      _paq.push(['trackPageView', document.title, {
-            dimension1: 'pamie',
-            dimension2: 'svn'
-      }]);
-      _paq.push(['enableLinkTracking']);
-      (function() {
-        var u="//analytics.slashdotmedia.com/";
-        _paq.push(['setTrackerUrl', u+'sf.php']);
-        _paq.push(['setSiteId', 39]);
-        var d=document, g=d.createElement('script'), s=d.getElementsByTagName('script')[0];
-        g.type='text/javascript'; g.async=true; g.defer=true; g.src=u+'sf.js'; s.parentNode.insertBefore(g,s);
-      })();
-    }
-    bizx.cmp.ifConsent('publisher', ['storage', 'measurement'], initPiwik);
-</script>
-
-
-
-</head>
-
-<body class="
-body_class sandiego_chrome  legacy_chrome  l-allow-natural-width 
-" id="forge">
-
-    
-        <!-- ew:body_top_js -->
-
-    
-        
-<!-- /ew:body_top_js -->
-
-    
-
-
-
-
-
-<div class="off-canvas position-right" id="offCanvas" data-off-canvas>
-    <!-- Menu -->
-    <ul class="header-nav-menulist">
-        <li class="highlight social row">
-            <span class="social-label">Connect</span>
-            <span class="social-icons">
-                
-<span></span>
-<a href="https://twitter.com/sourceforge" class="twitter" rel="nofollow" target="_blank">
-
-<svg  viewBox="0 0 1792 1792" xmlns="http://www.w3.org/2000/svg"><path d="M1684 408q-67 98-162 167 1 14 1 42 0 130-38 259.5t-115.5 248.5-184.5 210.5-258 146-323 54.5q-271 0-496-145 35 4 78 4 225 0 401-138-105-2-188-64.5t-114-159.5q33 5 61 5 43 0 85-11-112-23-185.5-111.5t-73.5-205.5v-4q68 38 146 41-66-44-105-115t-39-154q0-88 44-163 121 149 294.5 238.5t371.5 99.5q-8-38-8-74 0-134 94.5-228.5t228.5-94.5q140 0 236 102 109-21 205-78-37 115-142 178 93-10 186-50z"/></svg></a>
-<a href="https://www.facebook.com/sourceforgenet/" class="facebook" rel="nofollow" target="_blank">
-
-<svg  viewBox="0 0 1792 1792" xmlns="http://www.w3.org/2000/svg"><path d="M1343 12v264h-157q-86 0-116 36t-30 108v189h293l-39 296h-254v759h-306v-759h-255v-296h255v-218q0-186 104-288.5t277-102.5q147 0 228 12z"/></svg></a>
-<a href="https://www.linkedin.com/company/sourceforge.net" class="linkedin" rel="nofollow" target="_blank">
-
-<svg  viewBox="0 0 1792 1792" xmlns="http://www.w3.org/2000/svg"><path d="M477 625v991h-330v-991h330zm21-306q1 73-50.5 122t-135.5 49h-2q-82 0-132-49t-50-122q0-74 51.5-122.5t134.5-48.5 133 48.5 51 122.5zm1166 729v568h-329v-530q0-105-40.5-164.5t-126.5-59.5q-63 0-105.5 34.5t-63.5 85.5q-11 30-11 81v553h-329q2-399 2-647t-1-296l-1-48h329v144h-2q20-32 41-56t56.5-52 87-43.5 114.5-15.5q171 0 275 113.5t104 332.5z"/></svg></a>
-<a href="/user/newsletters" rel=nofollow class="newsletter" title="Subscribe to our newsletter">
-
-<svg  version="1.1"  xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" viewBox="0 0 42 42" enable-background="new 0 0 42 42" xml:space="preserve"><path fill="#FFFFFF" d="M0,6v30h42V6H0z M24.2,21.2c-0.8,0.8-2.3,2-3.2,2c-0.9,0-2.4-1.2-3.2-2L5.8,9.7h30.3L24.2,21.2z M13.7,21l-9.9,9.4V11.6L13.7,21z M15.7,23L15.7,23c0.5,0.5,2.9,2.9,5.3,2.9c2.4,0,4.8-2.4,5.2-2.8l0.1-0.1l9.8,9.4H5.8L15.7,23z M28.3,21l9.9-9.5v18.9L28.3,21z"/></svg></a>
-<span></span>
-            </span>
-        </li>
-        <li class="highlight search">
-            <form method="get" action="/directory/">
-    
-        <input type="text" placeholder="Search for software or solutions" autocomplete="off" name="q" >
-        
-        <label>
-        <input type="submit" class="bt" value="">
-            
-
-<svg  viewBox="0 0 1792 1792" xmlns="http://www.w3.org/2000/svg"><path d="M1216 832q0-185-131.5-316.5t-316.5-131.5-316.5 131.5-131.5 316.5 131.5 316.5 316.5 131.5 316.5-131.5 131.5-316.5zm512 832q0 52-38 90t-90 38q-54 0-90-38l-343-342q-179 124-399 124-143 0-273.5-55.5t-225-150-150-225-55.5-273.5 55.5-273.5 150-225 225-150 273.5-55.5 273.5 55.5 225 150 150 225 55.5 273.5q0 220-124 399l343 343q37 37 37 90z"/></svg>
-        </label>
-    
-    </form>
-        </li>
-        
-
-    
-
-    
-    
-    
-        <li class="highlight"><a href="/articles/">Articles</a></li>
-    
-    
-        <li class="highlight"><a href="/cloud-storage-providers/">Cloud Storage</a></li>
-    
-    
-        <li class="highlight"><a href="/business-voip/">Business VoIP</a></li>
-    
-    
-    
-        <li class="highlight"><a href="/speedtest/">Internet Speed Test</a></li>
-    
-
-    
-
-        <li><a href="/directory/">Open Source Software</a></li>
-        <li><a href="/software/">Business Software</a></li>
-        <li><a href="/blog" title="Blog">Blog</a></li>
-        <li><a href="https://deals.sourceforge.net/?utm_source=sourceforge&utm_medium=navbar&utm_campaign=homepage">Deals</a></li>
-        <li><a href="/support">Help</a></li>
-        
-        <li><a href="/create">Create</a></li>
-        
-        
-        <li><a href="">Join/Login</a></li>
-        
-        <li><a href="/about">About</a></li>
-        <li><a href="/top">Top Downloaded Projects</a></li>
-        <li><a href="/blog/category/sitestatus/">Site Status</a></li>
-        <li><a href="https://twitter.com/sfnet_ops">@sfnet_ops</a></li>
-        <li><a href="https://twitter.com/sourceforge">@sourceforge</a></li>
-        <li><a href="https://p.sf.net/sourceforge/docs">Site Documentation</a></li>
-        <li><a href="/support">Support Request</a></li>
-        <li><a href="https://slashdotmedia.com/terms-of-use/">Terms</a></li>
-        <li><a href="https://slashdotmedia.com/privacy-statement/">Privacy</a></li>
-        <li><a href="https://slashdotmedia.com/opt-out-choices/">Opt Out</a></li>
-        <li><a href="https://slashdotmedia.com/">Advertise</a></li>
-    </ul>
-</div>
-<div class="off-canvas-content" data-off-canvas-content>
-
-    
-
-
-<script>
-    SF.linkout_icon = '<svg  version="1.1"  xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" viewBox="0 0 300 300" style="enable-background:new 0 0 300 300;" xml:space="preserve"><polygon class="st0" points="243.2,243.2 56.8,243.2 56.8,56.8 123,56.8 123,9 9,9 9,291 291,291 291,179.4 243.2,179 "/><polygon class="st0" points="128.5,213 155,186.5 176,165.5 206.7,196.3 235.5,132.5 248.9,102.6 290.6,9.8 291,9 290.6,9.2 197.4,51.1 169.1,63.8 103.7,93.3 137,126.5 115.9,147.5 89.5,174 "/></svg>';
-</script>
-
-
-<div class="l-header-nav  sandiego">
-
-    <section class="sandiego l-header-nav-top show-for-large">
-        <div class="row">
-            <a href="/" title="Home" class="sf-logo">
-                
-
-<svg  version="1.1"  xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"     viewBox="0 0 653 102.6" style="enable-background:new 0 0 653 102.6;" xml:space="preserve"><path class="st0" d="M66.9,54.5c0-19.1-6.8-27.8-10.4-31.1c-0.7-0.6-1.8-0.1-1.7,0.9c0.7,10.8-12.9,13.5-12.9,30.4h0    c0,0,0,0.1,0,0.1c0,10.3,7.8,18.7,17.4,18.7c9.6,0,17.4-8.4,17.4-18.7c0,0,0-0.1,0-0.1h0c0-4.8-1.8-9.4-3.6-12.8    c-0.4-0.7-1.4-0.4-1.3,0.2C75.1,56.7,66.9,65.7,66.9,54.5z"/><g>    <path class="st0" d="M46.2,94.8c-0.4,0-0.9-0.2-1.2-0.5L0.5,49.8c-0.6-0.6-0.6-1.7,0-2.4l47-47C47.8,0.2,48.2,0,48.6,0h13.5        c0.8,0,1.3,0.5,1.5,1c0.2,0.5,0.2,1.2-0.4,1.8L19.1,47c-0.9,0.9-0.9,2.3,0,3.2L54,85.2c0.6,0.6,0.6,1.7,0,2.4l-6.7,6.8        C47,94.6,46.6,94.8,46.2,94.8z"/></g><g>    <path class="st0" d="M55.1,102.6c-0.8,0-1.3-0.5-1.5-1c-0.2-0.5-0.2-1.2,0.4-1.8l44.2-44.2c0.4-0.4,0.7-1,0.7-1.6        c0-0.6-0.2-1.2-0.7-1.6L63.2,17.4c-0.6-0.6-0.6-1.7,0-2.4l6.8-6.8c0.3-0.3,0.7-0.5,1.2-0.5S72,8,72.3,8.3l44.4,44.5        c0.3,0.3,0.5,0.7,0.5,1.2s-0.2,0.9-0.5,1.2l-47,47c-0.3,0.3-0.7,0.5-1.2,0.5H55.1z"/></g><g>    <g>        <path class="st1" d="M167.2,32c-0.2,0.4-0.5,0.6-1,0.6c-0.3,0-0.7-0.2-1.2-0.7c-0.5-0.5-1.2-1-2-1.5c-0.9-0.6-1.9-1.1-3.2-1.5            c-1.3-0.5-2.9-0.7-4.8-0.7c-1.9,0-3.5,0.3-5,0.8c-1.4,0.5-2.6,1.3-3.6,2.2s-1.7,2-2.2,3.2c-0.5,1.2-0.8,2.5-0.8,3.8            c0,1.8,0.4,3.2,1.1,4.4c0.7,1.1,1.7,2.1,3,2.9c1.2,0.8,2.6,1.5,4.2,2c1.6,0.6,3.2,1.1,4.8,1.6c1.6,0.5,3.2,1.1,4.8,1.8            c1.6,0.6,2.9,1.5,4.2,2.4s2.2,2.2,3,3.6c0.7,1.4,1.1,3.2,1.1,5.3c0,2.2-0.4,4.2-1.1,6.1c-0.7,1.9-1.8,3.6-3.2,5            c-1.4,1.4-3.2,2.5-5.2,3.4c-2.1,0.8-4.4,1.2-7,1.2c-3.4,0-6.4-0.6-8.8-1.8c-2.5-1.2-4.6-2.9-6.5-5l1-1.6c0.3-0.4,0.6-0.5,1-0.5            c0.2,0,0.5,0.1,0.8,0.4c0.3,0.3,0.8,0.7,1.2,1.1c0.5,0.4,1.1,0.9,1.8,1.4c0.7,0.5,1.5,1,2.4,1.4c0.9,0.4,1.9,0.8,3.1,1.1            c1.2,0.3,2.5,0.4,4,0.4c2.1,0,3.9-0.3,5.5-0.9c1.6-0.6,3-1.5,4.1-2.5s2-2.4,2.6-3.8c0.6-1.5,0.9-3.1,0.9-4.7            c0-1.8-0.4-3.3-1.1-4.5c-0.7-1.2-1.7-2.2-3-3c-1.2-0.8-2.6-1.5-4.2-2c-1.6-0.5-3.2-1.1-4.8-1.6c-1.6-0.5-3.2-1.1-4.8-1.7            c-1.6-0.6-2.9-1.4-4.2-2.4c-1.2-1-2.2-2.2-3-3.7c-0.7-1.5-1.1-3.3-1.1-5.6c0-1.7,0.3-3.4,1-5c0.7-1.6,1.6-3,2.9-4.3            c1.3-1.2,2.8-2.2,4.7-3c1.9-0.7,4-1.1,6.4-1.1c2.7,0,5.1,0.4,7.3,1.3c2.1,0.9,4.1,2.2,5.9,3.9L167.2,32z"/>        <path class="st2" d="M152.9,78.8c-3.5,0-6.6-0.6-9.1-1.9c-2.5-1.2-4.8-3-6.7-5.1l-0.3-0.3l1.3-2c0.6-0.7,1.1-0.8,1.5-0.8            c0.4,0,0.8,0.2,1.2,0.6c0.3,0.3,0.8,0.7,1.3,1.1c0.5,0.4,1.1,0.9,1.7,1.4c0.7,0.5,1.4,0.9,2.3,1.3c0.9,0.4,1.9,0.8,3,1            c1.1,0.3,2.4,0.4,3.9,0.4c2,0,3.8-0.3,5.3-0.9c1.5-0.6,2.8-1.4,3.9-2.4c1-1,1.9-2.2,2.4-3.6c0.6-1.4,0.8-2.9,0.8-4.5            c0-1.7-0.3-3.1-1-4.2c-0.7-1.1-1.6-2-2.8-2.8c-1.2-0.8-2.5-1.4-4-1.9c-1.5-0.5-3.1-1.1-4.8-1.6c-1.7-0.5-3.3-1.1-4.8-1.7            c-1.6-0.7-3.1-1.5-4.3-2.5c-1.3-1-2.3-2.4-3.1-3.9c-0.8-1.6-1.2-3.5-1.2-5.8c0-1.8,0.3-3.6,1-5.3c0.7-1.7,1.7-3.2,3-4.5            c1.3-1.3,3-2.3,4.9-3.1c1.9-0.8,4.2-1.2,6.6-1.2c2.8,0,5.3,0.4,7.5,1.3c2.2,0.9,4.2,2.3,6.1,4.1l0.3,0.3l-1.1,2.1            c-0.6,1.1-1.7,1.4-3.1,0.1c-0.5-0.4-1.1-0.9-2-1.4c-0.8-0.5-1.9-1-3.1-1.5c-1.2-0.4-2.7-0.7-4.6-0.7c-1.8,0-3.4,0.3-4.8,0.8            c-1.3,0.5-2.5,1.2-3.4,2.1c-0.9,0.9-1.6,1.9-2.1,3c-0.5,1.1-0.7,2.4-0.7,3.6c0,1.6,0.3,3,1,4c0.7,1.1,1.6,2,2.8,2.8            c1.2,0.8,2.5,1.4,4,2c1.5,0.5,3.1,1.1,4.8,1.6c1.6,0.5,3.3,1.1,4.8,1.8c1.6,0.7,3.1,1.5,4.3,2.5c1.3,1,2.3,2.3,3.1,3.8            c0.8,1.5,1.2,3.4,1.2,5.6c0,2.2-0.4,4.4-1.2,6.4c-0.8,2-1.9,3.7-3.4,5.2c-1.5,1.5-3.3,2.6-5.4,3.5            C158.1,78.3,155.6,78.8,152.9,78.8z M138.4,71.3c1.7,1.9,3.7,3.4,6,4.5c2.4,1.2,5.3,1.8,8.6,1.8c2.5,0,4.8-0.4,6.8-1.2            c2-0.8,3.6-1.9,5-3.2c1.3-1.3,2.4-3,3.1-4.8c0.7-1.8,1.1-3.8,1.1-5.9c0-2-0.4-3.7-1-5.1c-0.7-1.3-1.6-2.5-2.8-3.4            c-1.2-0.9-2.5-1.7-4-2.4c-1.5-0.6-3.1-1.2-4.7-1.8c-1.6-0.5-3.2-1.1-4.8-1.6c-1.6-0.6-3-1.3-4.3-2.1c-1.3-0.8-2.3-1.9-3.1-3.1            c-0.8-1.2-1.2-2.8-1.2-4.7c0-1.4,0.3-2.8,0.8-4.1c0.5-1.3,1.3-2.5,2.3-3.4c1-1,2.3-1.8,3.8-2.3c1.5-0.6,3.3-0.8,5.2-0.8            c1.9,0,3.6,0.2,5,0.7c1.3,0.5,2.5,1,3.3,1.6c0.9,0.6,1.6,1.1,2.1,1.6c0.6,0.5,0.8,0.5,0.8,0.5c0.1,0,0.3,0,0.4-0.3l0.7-1.3            c-1.6-1.5-3.4-2.7-5.3-3.5c-2.1-0.8-4.4-1.2-7-1.2c-2.3,0-4.4,0.4-6.2,1.1c-1.8,0.7-3.3,1.7-4.5,2.8c-1.2,1.2-2.1,2.5-2.8,4.1            c-0.6,1.5-0.9,3.1-0.9,4.8c0,2.1,0.4,3.9,1.1,5.3c0.7,1.4,1.6,2.6,2.8,3.5c1.2,0.9,2.5,1.7,4,2.3c1.5,0.6,3.1,1.2,4.7,1.7            c1.6,0.5,3.2,1,4.8,1.6c1.6,0.6,3,1.2,4.3,2.1c1.3,0.8,2.4,1.9,3.1,3.2c0.8,1.3,1.2,2.9,1.2,4.9c0,1.8-0.3,3.4-0.9,5            c-0.6,1.6-1.5,2.9-2.7,4c-1.2,1.1-2.6,2-4.3,2.7c-1.7,0.6-3.6,1-5.7,1c-1.5,0-2.9-0.2-4.2-0.5c-1.2-0.3-2.3-0.7-3.2-1.1            c-0.9-0.4-1.8-0.9-2.5-1.5c-0.7-0.5-1.3-1-1.8-1.4c-0.5-0.4-0.9-0.8-1.2-1.1c-0.3-0.3-0.5-0.3-0.5-0.3c-0.1,0-0.3,0-0.5,0.3            L138.4,71.3z"/>    </g>    <g>        <path class="st1" d="M226.7,51.6c0,4-0.6,7.6-1.8,10.9c-1.2,3.3-2.9,6.1-5.1,8.4c-2.2,2.3-4.8,4.1-7.8,5.4            c-3,1.3-6.4,1.9-10.1,1.9c-3.6,0-7-0.6-10-1.9c-3-1.3-5.6-3-7.8-5.4c-2.2-2.3-3.9-5.1-5.1-8.4c-1.2-3.3-1.8-6.9-1.8-10.9            c0-4,0.6-7.6,1.8-10.9c1.2-3.3,2.9-6.1,5.1-8.4c2.2-2.3,4.8-4.1,7.8-5.4c3-1.3,6.4-1.9,10-1.9c3.7,0,7.1,0.6,10.1,1.9            c3,1.3,5.6,3,7.8,5.4c2.2,2.3,3.9,5.1,5.1,8.4C226.1,44,226.7,47.6,226.7,51.6z M222.8,51.6c0-3.6-0.5-6.9-1.5-9.8            c-1-2.9-2.4-5.3-4.2-7.3c-1.8-2-4-3.5-6.6-4.6c-2.6-1.1-5.4-1.6-8.5-1.6c-3.1,0-5.9,0.5-8.5,1.6c-2.6,1.1-4.8,2.6-6.6,4.6            c-1.8,2-3.3,4.4-4.3,7.3c-1,2.9-1.5,6.1-1.5,9.8c0,3.6,0.5,6.9,1.5,9.8c1,2.9,2.4,5.3,4.3,7.3c1.8,2,4,3.5,6.6,4.6            c2.6,1.1,5.4,1.6,8.5,1.6c3.1,0,6-0.5,8.5-1.6c2.6-1,4.8-2.6,6.6-4.6c1.8-2,3.2-4.4,4.2-7.3C222.3,58.5,222.8,55.3,222.8,51.6z"/>        <path class="st2" d="M202,78.7c-3.7,0-7.2-0.7-10.2-1.9c-3.1-1.3-5.8-3.1-8-5.5c-2.2-2.4-4-5.2-5.2-8.6c-1.2-3.3-1.9-7.1-1.9-11.1            c0-4,0.6-7.8,1.9-11.1c1.2-3.3,3-6.2,5.2-8.6c2.2-2.4,4.9-4.2,8-5.5c3.1-1.3,6.5-2,10.2-2c3.8,0,7.2,0.7,10.3,1.9            c3.1,1.3,5.8,3.1,8,5.5c2.2,2.4,4,5.3,5.2,8.6c1.2,3.3,1.8,7,1.8,11.1c0,4.1-0.6,7.8-1.8,11.1c-1.2,3.3-3,6.2-5.2,8.6            c-2.2,2.4-4.9,4.2-8,5.5C209.2,78.1,205.7,78.7,202,78.7z M202,25.7c-3.5,0-6.8,0.6-9.8,1.9c-2.9,1.2-5.5,3-7.6,5.2            c-2.1,2.2-3.8,5-4.9,8.2c-1.2,3.2-1.8,6.8-1.8,10.7c0,3.9,0.6,7.5,1.8,10.7c1.2,3.2,2.8,5.9,4.9,8.2c2.1,2.2,4.7,4,7.6,5.2            c2.9,1.2,6.2,1.8,9.8,1.8c3.6,0,6.9-0.6,9.8-1.8c2.9-1.2,5.5-3,7.6-5.2c2.1-2.2,3.8-5,4.9-8.1c1.2-3.2,1.8-6.8,1.8-10.7            c0-3.9-0.6-7.5-1.8-10.7c-1.2-3.2-2.8-5.9-4.9-8.2c-2.1-2.2-4.7-4-7.6-5.2C208.9,26.3,205.6,25.7,202,25.7z"/>    </g>    <g>        <path class="st1" d="M256.4,74.9c2.5,0,4.7-0.4,6.7-1.3c2-0.9,3.6-2.1,5-3.6c1.4-1.5,2.4-3.4,3.1-5.4c0.7-2.1,1.1-4.3,1.1-6.8            V25.7h3.7v32.1c0,2.9-0.5,5.5-1.4,8c-0.9,2.5-2.2,4.6-3.9,6.5c-1.7,1.8-3.8,3.3-6.2,4.3c-2.4,1-5.2,1.6-8.2,1.6            c-3,0-5.8-0.5-8.2-1.6c-2.4-1.1-4.5-2.5-6.2-4.3c-1.7-1.8-3-4-3.9-6.5c-0.9-2.5-1.4-5.2-1.4-8V25.7h3.8v32c0,2.4,0.4,4.7,1.1,6.8            c0.7,2.1,1.8,3.9,3.1,5.4c1.4,1.5,3,2.7,5,3.6C251.6,74.5,253.9,74.9,256.4,74.9z"/>        <path class="st2" d="M256.4,78.8c-3.1,0-5.9-0.5-8.4-1.6c-2.5-1.1-4.7-2.6-6.4-4.5c-1.7-1.9-3.1-4.2-4-6.7            c-0.9-2.5-1.4-5.3-1.4-8.2V25.1h5v32.7c0,2.3,0.4,4.5,1,6.6c0.7,2,1.7,3.8,3,5.2c1.3,1.5,2.9,2.6,4.8,3.5c1.9,0.8,4,1.3,6.4,1.3            c2.4,0,4.6-0.4,6.4-1.2c1.9-0.8,3.5-2,4.8-3.5c1.3-1.5,2.3-3.2,3-5.2c0.7-2,1-4.2,1-6.6V25.1h5v32.7c0,2.9-0.5,5.7-1.4,8.2            c-0.9,2.5-2.3,4.8-4,6.7c-1.7,1.9-3.9,3.4-6.4,4.5C262.3,78.3,259.5,78.8,256.4,78.8z M237.3,26.3v31.5c0,2.8,0.4,5.4,1.3,7.8            c0.9,2.4,2.1,4.5,3.8,6.3c1.6,1.8,3.6,3.2,6,4.2c2.3,1,5,1.5,8,1.5c2.9,0,5.6-0.5,8-1.5c2.3-1,4.4-2.4,6-4.2            c1.6-1.8,2.9-3.9,3.8-6.3c0.9-2.4,1.3-5,1.3-7.8V26.3h-2.5v31.5c0,2.5-0.4,4.8-1.1,7c-0.7,2.2-1.8,4.1-3.3,5.7            c-1.4,1.6-3.2,2.9-5.2,3.8c-2,0.9-4.4,1.4-6.9,1.4c-2.6,0-4.9-0.5-6.9-1.4c-2-0.9-3.8-2.2-5.2-3.8c-1.4-1.6-2.5-3.5-3.2-5.7            c-0.7-2.1-1.1-4.5-1.1-7V26.3H237.3z"/>    </g>    <g>        <path class="st1" d="M297.5,51.3c1,0,0.9,0,0.9,0l2.2,0c2.3,0,4.4-0.3,6.2-0.8c1.8-0.6,3.4-1.3,4.6-2.4c1.3-1,2.2-2.3,2.9-3.7            c0.7-1.4,1-3.1,1-4.9c0-3.7-1.2-6.4-3.6-8.2c-2.4-1.8-5.9-2.7-10.6-2.7h-9.5v22.7v2.8v23.5h-3.7V25.7h13.2c6,0,10.5,1.2,13.4,3.5            c3,2.3,4.4,5.7,4.4,10.2c0,2-0.3,3.8-1,5.4c-0.7,1.6-1.7,3.1-3,4.3c-1.3,1.2-2.8,2.3-4.6,3c-1.8,0.8-3.9,1.3-6.1,1.6            c0.6,0.4,1.1,0.9,1.6,1.5l17.9,22.4h-3.3c-0.4,0-0.7-0.1-1-0.2c-0.3-0.1-0.6-0.4-0.8-0.7l-16.6-21c-0.4-0.5-0.9-0.9-1.3-1.1            c-0.5-0.2-3.4-0.3-4.4-0.3C296.3,51.6,296.7,51.3,297.5,51.3z"/>        <path class="st2" d="M325,78.2h-4.5c-0.5,0-0.9-0.1-1.3-0.3c-0.4-0.2-0.7-0.5-1-0.9l-16.6-21c-0.4-0.5-0.7-0.8-1.1-1            c-0.4-0.1-2.8-0.3-4.1-0.3h-0.6v-2.6c0-0.9,0.2-1.4,1.8-1.4c0.9,0,1,0,1,0l2.2,0c2.2,0,4.2-0.3,6-0.8c1.7-0.5,3.2-1.3,4.4-2.3            c1.2-1,2.1-2.1,2.7-3.5c0.6-1.4,0.9-2.9,0.9-4.6c0-3.5-1.1-6-3.4-7.7c-2.3-1.7-5.7-2.6-10.2-2.6h-8.9v48.9h-5V25.1h13.9            c6.1,0,10.7,1.2,13.8,3.6c3.1,2.4,4.7,6,4.7,10.7c0,2.1-0.4,4-1.1,5.7c-0.7,1.7-1.8,3.2-3.1,4.5c-1.3,1.3-3,2.3-4.8,3.2            c-1.5,0.6-3.1,1.1-4.9,1.4c0.2,0.2,0.4,0.4,0.6,0.7L325,78.2z M296.9,53.5c1.1,0,3.4,0.1,4,0.4c0.6,0.3,1.1,0.7,1.6,1.3l16.6,21            c0.2,0.3,0.4,0.5,0.6,0.6c0.2,0.1,0.4,0.2,0.7,0.2h2l-17.1-21.4c-0.4-0.6-0.9-1-1.4-1.3l-1.5-0.9l1.8-0.2c2.2-0.2,4.2-0.7,5.9-1.5            c1.7-0.8,3.2-1.7,4.5-2.9c1.2-1.2,2.2-2.5,2.8-4.1c0.6-1.6,1-3.3,1-5.2c0-4.3-1.4-7.5-4.2-9.7c-2.8-2.2-7.2-3.3-13-3.3h-12.6V77            h2.5V28h10.1c4.7,0,8.4,0.9,10.9,2.8c2.6,1.9,3.9,4.8,3.9,8.7c0,1.9-0.4,3.6-1,5.1c-0.7,1.5-1.7,2.8-3.1,3.9            c-1.3,1.1-2.9,1.9-4.8,2.5c-1.9,0.6-4,0.9-6.4,0.9l-2.2,0c-0.1,0-0.2,0-0.9,0C297.3,51.9,297,51.9,296.9,53.5z"/>    </g>    <g>        <path class="st1" d="M367.6,68.8c0.2,0,0.5,0.1,0.6,0.3l1.5,1.6c-1.1,1.1-2.2,2.2-3.5,3.1c-1.3,0.9-2.7,1.7-4.2,2.3            c-1.5,0.6-3.2,1.1-4.9,1.5c-1.8,0.4-3.8,0.5-5.9,0.5c-3.6,0-6.9-0.6-9.9-1.9c-3-1.3-5.6-3-7.7-5.4c-2.1-2.3-3.8-5.1-5-8.4            c-1.2-3.3-1.8-6.9-1.8-10.9c0-3.9,0.6-7.5,1.9-10.8c1.2-3.3,3-6,5.2-8.4c2.2-2.3,4.9-4.1,8-5.4c3.1-1.3,6.6-1.9,10.3-1.9            c1.9,0,3.6,0.1,5.2,0.4c1.6,0.3,3,0.7,4.4,1.2c1.4,0.5,2.6,1.2,3.8,2c1.2,0.8,2.4,1.7,3.5,2.7l-1.1,1.6c-0.2,0.3-0.5,0.4-0.9,0.4            c-0.2,0-0.5-0.1-0.8-0.4c-0.3-0.3-0.8-0.6-1.3-1c-0.5-0.4-1.2-0.8-1.9-1.2c-0.7-0.5-1.6-0.9-2.7-1.2c-1-0.4-2.2-0.7-3.6-1            c-1.3-0.3-2.9-0.4-4.6-0.4c-3.2,0-6.1,0.5-8.7,1.6c-2.6,1.1-4.9,2.6-6.8,4.7c-1.9,2-3.4,4.5-4.5,7.3s-1.6,6.1-1.6,9.7            c0,3.7,0.5,6.9,1.6,9.8c1.1,2.9,2.5,5.3,4.4,7.3c1.9,2,4.1,3.5,6.6,4.6c2.5,1.1,5.3,1.6,8.2,1.6c1.9,0,3.5-0.1,5-0.4            c1.5-0.2,2.8-0.6,4-1.1c1.2-0.5,2.4-1.1,3.4-1.8c1.1-0.7,2.1-1.5,3.1-2.5c0.1-0.1,0.2-0.2,0.3-0.2            C367.3,68.9,367.5,68.8,367.6,68.8z"/>        <path class="st2" d="M351.1,78.8c-3.7,0-7.1-0.7-10.1-1.9c-3.1-1.3-5.7-3.1-7.9-5.5c-2.2-2.4-3.9-5.2-5.1-8.6            c-1.2-3.3-1.8-7.1-1.8-11.1c0-4,0.6-7.7,1.9-11c1.3-3.3,3.1-6.2,5.3-8.6c2.3-2.4,5.1-4.3,8.2-5.6c3.2-1.3,6.7-2,10.6-2            c1.9,0,3.7,0.1,5.3,0.4c1.6,0.3,3.1,0.7,4.5,1.2c1.4,0.5,2.7,1.2,3.9,2c1.2,0.8,2.4,1.7,3.6,2.8l0.4,0.4l-1.4,2.1            c-0.2,0.3-0.6,0.7-1.4,0.7c-0.4,0-0.7-0.2-1.2-0.5c-0.3-0.3-0.8-0.6-1.3-0.9c-0.5-0.4-1.1-0.8-1.9-1.2c-0.7-0.4-1.6-0.8-2.6-1.2            c-1-0.4-2.2-0.7-3.5-0.9c-1.3-0.2-2.8-0.4-4.5-0.4c-3.1,0-5.9,0.5-8.5,1.6c-2.5,1.1-4.8,2.6-6.6,4.5c-1.8,1.9-3.3,4.3-4.3,7.1            c-1,2.8-1.6,6-1.6,9.4c0,3.6,0.5,6.8,1.5,9.6c1,2.8,2.4,5.2,4.2,7.1c1.8,1.9,3.9,3.4,6.4,4.4c2.4,1,5.1,1.5,8,1.5            c1.8,0,3.5-0.1,4.9-0.4c1.4-0.2,2.7-0.6,3.9-1.1c1.2-0.5,2.3-1.1,3.3-1.7c1-0.7,2-1.5,3-2.4c0.2-0.2,0.3-0.2,0.5-0.3            c0.5-0.3,1.3-0.2,1.7,0.3l1.9,2l-0.4,0.4c-1.1,1.2-2.3,2.2-3.6,3.2c-1.3,0.9-2.7,1.8-4.3,2.4c-1.5,0.7-3.2,1.2-5.1,1.5            C355.3,78.6,353.3,78.8,351.1,78.8z M352.2,25.7c-3.7,0-7.1,0.6-10.1,1.9c-3,1.2-5.7,3-7.8,5.3c-2.2,2.3-3.9,5-5.1,8.2            c-1.2,3.2-1.8,6.7-1.8,10.6c0,3.9,0.6,7.5,1.8,10.7c1.2,3.2,2.8,5.9,4.9,8.2c2.1,2.2,4.6,4,7.5,5.2c2.9,1.2,6.1,1.8,9.6,1.8            c2.1,0,4-0.2,5.8-0.5c1.7-0.3,3.4-0.8,4.8-1.5c1.5-0.6,2.8-1.4,4-2.3c1.1-0.8,2.1-1.7,3-2.6l-1.1-1.2c-0.1-0.1-0.2-0.1-0.3,0            c-0.1,0-0.2,0.1-0.3,0.2c-1,0.9-2.1,1.8-3.2,2.5c-1.1,0.7-2.3,1.4-3.5,1.9c-1.3,0.5-2.7,0.9-4.1,1.1c-1.5,0.2-3.2,0.4-5.1,0.4            c-3,0-5.9-0.6-8.5-1.6c-2.6-1.1-4.9-2.7-6.8-4.7c-1.9-2-3.4-4.6-4.5-7.5c-1.1-2.9-1.6-6.3-1.6-10c0-3.6,0.5-6.9,1.6-9.9            c1.1-2.9,2.6-5.5,4.6-7.5c2-2.1,4.3-3.7,7-4.8c2.7-1.1,5.7-1.7,8.9-1.7c1.7,0,3.3,0.1,4.7,0.4c1.4,0.3,2.6,0.6,3.7,1            c1.1,0.4,2,0.8,2.8,1.3c0.8,0.5,1.4,0.9,1.9,1.3c0.5,0.4,1,0.7,1.3,1c0.3,0.3,0.5,0.3,0.5,0.3c0.3,0,0.4-0.1,0.4-0.2l0.8-1.2            c-1-0.9-2-1.6-3-2.3c-1.2-0.8-2.4-1.4-3.7-1.9c-1.3-0.5-2.8-0.9-4.3-1.2C355.7,25.9,354,25.7,352.2,25.7z"/>    </g>    <g>        <path class="st1" d="M410.3,25.7v3.1H383v21h22.7v3H383v21.6h27.3v3.1h-31.1V25.7H410.3z"/>        <path class="st2" d="M410.9,78.2h-32.3V25.1h32.3v4.3h-27.3v19.7h22.7v4.3h-22.7v20.4h27.3V78.2z M379.8,77h29.9v-1.9h-27.3V52.2            h22.7v-1.8h-22.7V28.2h27.3v-1.9h-29.9V77z"/>    </g>    <g>        <path class="st1" d="M456.8,25.1V33h-23.5v15.7h19.8v7.9h-19.8v21.6h-9.9v-53H456.8z"/>    </g>    <g>        <path class="st1" d="M514.3,51.6c0,3.9-0.6,7.5-1.9,10.8c-1.3,3.3-3.1,6.2-5.5,8.6c-2.3,2.4-5.2,4.3-8.5,5.7c-3.3,1.4-7,2-11,2            c-4,0-7.7-0.7-11-2c-3.3-1.4-6.1-3.2-8.5-5.7c-2.4-2.4-4.2-5.3-5.5-8.6s-1.9-6.9-1.9-10.8s0.6-7.5,1.9-10.8            c1.3-3.3,3.1-6.2,5.5-8.6c2.4-2.4,5.2-4.3,8.5-5.7c3.3-1.4,7-2,11-2c4,0,7.7,0.7,11,2.1c3.3,1.4,6.1,3.3,8.5,5.7            c2.3,2.4,4.2,5.3,5.5,8.6C513.6,44.1,514.3,47.7,514.3,51.6z M504.2,51.6c0-2.9-0.4-5.5-1.2-7.8c-0.8-2.3-1.9-4.3-3.3-5.9            c-1.4-1.6-3.2-2.8-5.3-3.7c-2.1-0.9-4.4-1.3-7-1.3c-2.6,0-4.9,0.4-7,1.3c-2.1,0.9-3.8,2.1-5.3,3.7c-1.5,1.6-2.6,3.6-3.4,5.9            c-0.8,2.3-1.2,4.9-1.2,7.8s0.4,5.5,1.2,7.8c0.8,2.3,1.9,4.3,3.4,5.9c1.5,1.6,3.2,2.8,5.3,3.7c2.1,0.9,4.4,1.3,7,1.3            c2.6,0,4.9-0.4,7-1.3c2.1-0.9,3.8-2.1,5.3-3.7c1.4-1.6,2.5-3.6,3.3-5.9C503.8,57.1,504.2,54.5,504.2,51.6z"/>    </g>    <g>        <path class="st1" d="M534.9,50.4l2.3,0c1.9,0,3.5-0.2,4.9-0.7c1.4-0.5,2.5-1.1,3.4-1.9c0.9-0.8,1.6-1.8,2-2.9            c0.4-1.1,0.7-2.4,0.7-3.7c0-2.7-0.9-4.8-2.7-6.2c-1.8-1.4-4.5-2.2-8.1-2.2H531v17.6v7.1v20.7h-9.9v-53h16.2c3.6,0,6.7,0.4,9.3,1.1            c2.6,0.7,4.7,1.8,6.3,3.1c1.6,1.3,2.9,3,3.6,4.8c0.8,1.9,1.2,3.9,1.2,6.2c0,1.8-0.3,3.5-0.8,5.1c-0.5,1.6-1.3,3-2.3,4.3            c-1,1.3-2.2,2.4-3.7,3.4c-1.5,1-3.1,1.8-5,2.3c1.2,0.7,2.3,1.7,3.2,3l13.3,19.6h-8.9c-0.9,0-1.6-0.2-2.2-0.5            c-0.6-0.3-1.1-0.8-1.5-1.5c0,0-11.1-17-11.1-17c-0.3-0.4-0.9-1.3-1.5-1.4c-1.2,0-2.4,0-3.5,0c0,0,0-6,0-6.4            C533.8,50.4,534.9,50.4,534.9,50.4z"/>    </g>    <g>        <path class="st1" d="M591.4,70.9c2.2,0,4.2-0.2,5.8-0.6c1.6-0.4,3.2-1,4.7-1.7v-12h-6.6c-0.6,0-1.1-0.2-1.5-0.5            c-0.4-0.4-0.6-0.8-0.6-1.3v-5.6h17.6V73c-1.3,1-2.7,1.8-4.2,2.5c-1.5,0.7-3,1.3-4.7,1.8c-1.7,0.5-3.4,0.8-5.3,1            c-1.9,0.2-3.9,0.3-6.1,0.3c-3.9,0-7.4-0.7-10.7-2c-3.3-1.3-6.1-3.2-8.4-5.6c-2.4-2.4-4.2-5.3-5.6-8.6c-1.3-3.3-2-7-2-10.9            c0-4,0.6-7.6,1.9-11c1.3-3.3,3.1-6.2,5.5-8.6c2.4-2.4,5.3-4.3,8.7-5.6c3.4-1.3,7.2-2,11.4-2c4.3,0,8.1,0.6,11.2,1.9            c3.2,1.3,5.8,3,8,5l-2.9,4.5c-0.6,0.9-1.3,1.4-2.2,1.4c-0.6,0-1.2-0.2-1.8-0.6c-0.8-0.5-1.6-0.9-2.4-1.4c-0.8-0.5-1.7-0.9-2.7-1.2            c-1-0.3-2.1-0.6-3.3-0.8c-1.2-0.2-2.7-0.3-4.3-0.3c-2.6,0-5,0.4-7.1,1.3c-2.1,0.9-3.9,2.1-5.4,3.8c-1.5,1.6-2.6,3.6-3.4,5.9            c-0.8,2.3-1.2,4.9-1.2,7.7c0,3.1,0.4,5.8,1.3,8.2c0.9,2.4,2.1,4.4,3.6,6s3.4,2.9,5.5,3.8S588.9,70.9,591.4,70.9z"/>    </g>    <g>        <path class="st1" d="M645.7,56.8h-16.1v13.4H653v7.9h-33.4v-53H653V33h-23.5v16.3H648v5.8C648,55.1,647.9,56.8,645.7,56.8z"/>    </g></g></svg>
-            </a>
-            <nav class="links">
-
-                <a href="/support" title="Help">Help</a>
-                
-                <a href="/create" title="Create">Create</a>
-                
-
-                
-                <a href="/user/registration/" title="Join" >Join</a>
-                <a href="/auth/" title="Login">Login</a>
-                
-            </nav>
-        </div>
-    </section>
-
-    <section class="sandiego l-header-nav-top hide-for-large">
-        <div class="row">
-            <a href="/" title="Home" class="sf-logo">
-                
-
-<svg  version="1.1"  xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"     viewBox="0 0 653 102.6" style="enable-background:new 0 0 653 102.6;" xml:space="preserve"><path class="st0" d="M66.9,54.5c0-19.1-6.8-27.8-10.4-31.1c-0.7-0.6-1.8-0.1-1.7,0.9c0.7,10.8-12.9,13.5-12.9,30.4h0    c0,0,0,0.1,0,0.1c0,10.3,7.8,18.7,17.4,18.7c9.6,0,17.4-8.4,17.4-18.7c0,0,0-0.1,0-0.1h0c0-4.8-1.8-9.4-3.6-12.8    c-0.4-0.7-1.4-0.4-1.3,0.2C75.1,56.7,66.9,65.7,66.9,54.5z"/><g>    <path class="st0" d="M46.2,94.8c-0.4,0-0.9-0.2-1.2-0.5L0.5,49.8c-0.6-0.6-0.6-1.7,0-2.4l47-47C47.8,0.2,48.2,0,48.6,0h13.5        c0.8,0,1.3,0.5,1.5,1c0.2,0.5,0.2,1.2-0.4,1.8L19.1,47c-0.9,0.9-0.9,2.3,0,3.2L54,85.2c0.6,0.6,0.6,1.7,0,2.4l-6.7,6.8        C47,94.6,46.6,94.8,46.2,94.8z"/></g><g>    <path class="st0" d="M55.1,102.6c-0.8,0-1.3-0.5-1.5-1c-0.2-0.5-0.2-1.2,0.4-1.8l44.2-44.2c0.4-0.4,0.7-1,0.7-1.6        c0-0.6-0.2-1.2-0.7-1.6L63.2,17.4c-0.6-0.6-0.6-1.7,0-2.4l6.8-6.8c0.3-0.3,0.7-0.5,1.2-0.5S72,8,72.3,8.3l44.4,44.5        c0.3,0.3,0.5,0.7,0.5,1.2s-0.2,0.9-0.5,1.2l-47,47c-0.3,0.3-0.7,0.5-1.2,0.5H55.1z"/></g><g>    <g>        <path class="st1" d="M167.2,32c-0.2,0.4-0.5,0.6-1,0.6c-0.3,0-0.7-0.2-1.2-0.7c-0.5-0.5-1.2-1-2-1.5c-0.9-0.6-1.9-1.1-3.2-1.5            c-1.3-0.5-2.9-0.7-4.8-0.7c-1.9,0-3.5,0.3-5,0.8c-1.4,0.5-2.6,1.3-3.6,2.2s-1.7,2-2.2,3.2c-0.5,1.2-0.8,2.5-0.8,3.8            c0,1.8,0.4,3.2,1.1,4.4c0.7,1.1,1.7,2.1,3,2.9c1.2,0.8,2.6,1.5,4.2,2c1.6,0.6,3.2,1.1,4.8,1.6c1.6,0.5,3.2,1.1,4.8,1.8            c1.6,0.6,2.9,1.5,4.2,2.4s2.2,2.2,3,3.6c0.7,1.4,1.1,3.2,1.1,5.3c0,2.2-0.4,4.2-1.1,6.1c-0.7,1.9-1.8,3.6-3.2,5            c-1.4,1.4-3.2,2.5-5.2,3.4c-2.1,0.8-4.4,1.2-7,1.2c-3.4,0-6.4-0.6-8.8-1.8c-2.5-1.2-4.6-2.9-6.5-5l1-1.6c0.3-0.4,0.6-0.5,1-0.5            c0.2,0,0.5,0.1,0.8,0.4c0.3,0.3,0.8,0.7,1.2,1.1c0.5,0.4,1.1,0.9,1.8,1.4c0.7,0.5,1.5,1,2.4,1.4c0.9,0.4,1.9,0.8,3.1,1.1            c1.2,0.3,2.5,0.4,4,0.4c2.1,0,3.9-0.3,5.5-0.9c1.6-0.6,3-1.5,4.1-2.5s2-2.4,2.6-3.8c0.6-1.5,0.9-3.1,0.9-4.7            c0-1.8-0.4-3.3-1.1-4.5c-0.7-1.2-1.7-2.2-3-3c-1.2-0.8-2.6-1.5-4.2-2c-1.6-0.5-3.2-1.1-4.8-1.6c-1.6-0.5-3.2-1.1-4.8-1.7            c-1.6-0.6-2.9-1.4-4.2-2.4c-1.2-1-2.2-2.2-3-3.7c-0.7-1.5-1.1-3.3-1.1-5.6c0-1.7,0.3-3.4,1-5c0.7-1.6,1.6-3,2.9-4.3            c1.3-1.2,2.8-2.2,4.7-3c1.9-0.7,4-1.1,6.4-1.1c2.7,0,5.1,0.4,7.3,1.3c2.1,0.9,4.1,2.2,5.9,3.9L167.2,32z"/>        <path class="st2" d="M152.9,78.8c-3.5,0-6.6-0.6-9.1-1.9c-2.5-1.2-4.8-3-6.7-5.1l-0.3-0.3l1.3-2c0.6-0.7,1.1-0.8,1.5-0.8            c0.4,0,0.8,0.2,1.2,0.6c0.3,0.3,0.8,0.7,1.3,1.1c0.5,0.4,1.1,0.9,1.7,1.4c0.7,0.5,1.4,0.9,2.3,1.3c0.9,0.4,1.9,0.8,3,1            c1.1,0.3,2.4,0.4,3.9,0.4c2,0,3.8-0.3,5.3-0.9c1.5-0.6,2.8-1.4,3.9-2.4c1-1,1.9-2.2,2.4-3.6c0.6-1.4,0.8-2.9,0.8-4.5            c0-1.7-0.3-3.1-1-4.2c-0.7-1.1-1.6-2-2.8-2.8c-1.2-0.8-2.5-1.4-4-1.9c-1.5-0.5-3.1-1.1-4.8-1.6c-1.7-0.5-3.3-1.1-4.8-1.7            c-1.6-0.7-3.1-1.5-4.3-2.5c-1.3-1-2.3-2.4-3.1-3.9c-0.8-1.6-1.2-3.5-1.2-5.8c0-1.8,0.3-3.6,1-5.3c0.7-1.7,1.7-3.2,3-4.5            c1.3-1.3,3-2.3,4.9-3.1c1.9-0.8,4.2-1.2,6.6-1.2c2.8,0,5.3,0.4,7.5,1.3c2.2,0.9,4.2,2.3,6.1,4.1l0.3,0.3l-1.1,2.1            c-0.6,1.1-1.7,1.4-3.1,0.1c-0.5-0.4-1.1-0.9-2-1.4c-0.8-0.5-1.9-1-3.1-1.5c-1.2-0.4-2.7-0.7-4.6-0.7c-1.8,0-3.4,0.3-4.8,0.8            c-1.3,0.5-2.5,1.2-3.4,2.1c-0.9,0.9-1.6,1.9-2.1,3c-0.5,1.1-0.7,2.4-0.7,3.6c0,1.6,0.3,3,1,4c0.7,1.1,1.6,2,2.8,2.8            c1.2,0.8,2.5,1.4,4,2c1.5,0.5,3.1,1.1,4.8,1.6c1.6,0.5,3.3,1.1,4.8,1.8c1.6,0.7,3.1,1.5,4.3,2.5c1.3,1,2.3,2.3,3.1,3.8            c0.8,1.5,1.2,3.4,1.2,5.6c0,2.2-0.4,4.4-1.2,6.4c-0.8,2-1.9,3.7-3.4,5.2c-1.5,1.5-3.3,2.6-5.4,3.5            C158.1,78.3,155.6,78.8,152.9,78.8z M138.4,71.3c1.7,1.9,3.7,3.4,6,4.5c2.4,1.2,5.3,1.8,8.6,1.8c2.5,0,4.8-0.4,6.8-1.2            c2-0.8,3.6-1.9,5-3.2c1.3-1.3,2.4-3,3.1-4.8c0.7-1.8,1.1-3.8,1.1-5.9c0-2-0.4-3.7-1-5.1c-0.7-1.3-1.6-2.5-2.8-3.4            c-1.2-0.9-2.5-1.7-4-2.4c-1.5-0.6-3.1-1.2-4.7-1.8c-1.6-0.5-3.2-1.1-4.8-1.6c-1.6-0.6-3-1.3-4.3-2.1c-1.3-0.8-2.3-1.9-3.1-3.1            c-0.8-1.2-1.2-2.8-1.2-4.7c0-1.4,0.3-2.8,0.8-4.1c0.5-1.3,1.3-2.5,2.3-3.4c1-1,2.3-1.8,3.8-2.3c1.5-0.6,3.3-0.8,5.2-0.8            c1.9,0,3.6,0.2,5,0.7c1.3,0.5,2.5,1,3.3,1.6c0.9,0.6,1.6,1.1,2.1,1.6c0.6,0.5,0.8,0.5,0.8,0.5c0.1,0,0.3,0,0.4-0.3l0.7-1.3            c-1.6-1.5-3.4-2.7-5.3-3.5c-2.1-0.8-4.4-1.2-7-1.2c-2.3,0-4.4,0.4-6.2,1.1c-1.8,0.7-3.3,1.7-4.5,2.8c-1.2,1.2-2.1,2.5-2.8,4.1            c-0.6,1.5-0.9,3.1-0.9,4.8c0,2.1,0.4,3.9,1.1,5.3c0.7,1.4,1.6,2.6,2.8,3.5c1.2,0.9,2.5,1.7,4,2.3c1.5,0.6,3.1,1.2,4.7,1.7            c1.6,0.5,3.2,1,4.8,1.6c1.6,0.6,3,1.2,4.3,2.1c1.3,0.8,2.4,1.9,3.1,3.2c0.8,1.3,1.2,2.9,1.2,4.9c0,1.8-0.3,3.4-0.9,5            c-0.6,1.6-1.5,2.9-2.7,4c-1.2,1.1-2.6,2-4.3,2.7c-1.7,0.6-3.6,1-5.7,1c-1.5,0-2.9-0.2-4.2-0.5c-1.2-0.3-2.3-0.7-3.2-1.1            c-0.9-0.4-1.8-0.9-2.5-1.5c-0.7-0.5-1.3-1-1.8-1.4c-0.5-0.4-0.9-0.8-1.2-1.1c-0.3-0.3-0.5-0.3-0.5-0.3c-0.1,0-0.3,0-0.5,0.3            L138.4,71.3z"/>    </g>    <g>        <path class="st1" d="M226.7,51.6c0,4-0.6,7.6-1.8,10.9c-1.2,3.3-2.9,6.1-5.1,8.4c-2.2,2.3-4.8,4.1-7.8,5.4            c-3,1.3-6.4,1.9-10.1,1.9c-3.6,0-7-0.6-10-1.9c-3-1.3-5.6-3-7.8-5.4c-2.2-2.3-3.9-5.1-5.1-8.4c-1.2-3.3-1.8-6.9-1.8-10.9            c0-4,0.6-7.6,1.8-10.9c1.2-3.3,2.9-6.1,5.1-8.4c2.2-2.3,4.8-4.1,7.8-5.4c3-1.3,6.4-1.9,10-1.9c3.7,0,7.1,0.6,10.1,1.9            c3,1.3,5.6,3,7.8,5.4c2.2,2.3,3.9,5.1,5.1,8.4C226.1,44,226.7,47.6,226.7,51.6z M222.8,51.6c0-3.6-0.5-6.9-1.5-9.8            c-1-2.9-2.4-5.3-4.2-7.3c-1.8-2-4-3.5-6.6-4.6c-2.6-1.1-5.4-1.6-8.5-1.6c-3.1,0-5.9,0.5-8.5,1.6c-2.6,1.1-4.8,2.6-6.6,4.6            c-1.8,2-3.3,4.4-4.3,7.3c-1,2.9-1.5,6.1-1.5,9.8c0,3.6,0.5,6.9,1.5,9.8c1,2.9,2.4,5.3,4.3,7.3c1.8,2,4,3.5,6.6,4.6            c2.6,1.1,5.4,1.6,8.5,1.6c3.1,0,6-0.5,8.5-1.6c2.6-1,4.8-2.6,6.6-4.6c1.8-2,3.2-4.4,4.2-7.3C222.3,58.5,222.8,55.3,222.8,51.6z"/>        <path class="st2" d="M202,78.7c-3.7,0-7.2-0.7-10.2-1.9c-3.1-1.3-5.8-3.1-8-5.5c-2.2-2.4-4-5.2-5.2-8.6c-1.2-3.3-1.9-7.1-1.9-11.1            c0-4,0.6-7.8,1.9-11.1c1.2-3.3,3-6.2,5.2-8.6c2.2-2.4,4.9-4.2,8-5.5c3.1-1.3,6.5-2,10.2-2c3.8,0,7.2,0.7,10.3,1.9            c3.1,1.3,5.8,3.1,8,5.5c2.2,2.4,4,5.3,5.2,8.6c1.2,3.3,1.8,7,1.8,11.1c0,4.1-0.6,7.8-1.8,11.1c-1.2,3.3-3,6.2-5.2,8.6            c-2.2,2.4-4.9,4.2-8,5.5C209.2,78.1,205.7,78.7,202,78.7z M202,25.7c-3.5,0-6.8,0.6-9.8,1.9c-2.9,1.2-5.5,3-7.6,5.2            c-2.1,2.2-3.8,5-4.9,8.2c-1.2,3.2-1.8,6.8-1.8,10.7c0,3.9,0.6,7.5,1.8,10.7c1.2,3.2,2.8,5.9,4.9,8.2c2.1,2.2,4.7,4,7.6,5.2            c2.9,1.2,6.2,1.8,9.8,1.8c3.6,0,6.9-0.6,9.8-1.8c2.9-1.2,5.5-3,7.6-5.2c2.1-2.2,3.8-5,4.9-8.1c1.2-3.2,1.8-6.8,1.8-10.7            c0-3.9-0.6-7.5-1.8-10.7c-1.2-3.2-2.8-5.9-4.9-8.2c-2.1-2.2-4.7-4-7.6-5.2C208.9,26.3,205.6,25.7,202,25.7z"/>    </g>    <g>        <path class="st1" d="M256.4,74.9c2.5,0,4.7-0.4,6.7-1.3c2-0.9,3.6-2.1,5-3.6c1.4-1.5,2.4-3.4,3.1-5.4c0.7-2.1,1.1-4.3,1.1-6.8            V25.7h3.7v32.1c0,2.9-0.5,5.5-1.4,8c-0.9,2.5-2.2,4.6-3.9,6.5c-1.7,1.8-3.8,3.3-6.2,4.3c-2.4,1-5.2,1.6-8.2,1.6            c-3,0-5.8-0.5-8.2-1.6c-2.4-1.1-4.5-2.5-6.2-4.3c-1.7-1.8-3-4-3.9-6.5c-0.9-2.5-1.4-5.2-1.4-8V25.7h3.8v32c0,2.4,0.4,4.7,1.1,6.8            c0.7,2.1,1.8,3.9,3.1,5.4c1.4,1.5,3,2.7,5,3.6C251.6,74.5,253.9,74.9,256.4,74.9z"/>        <path class="st2" d="M256.4,78.8c-3.1,0-5.9-0.5-8.4-1.6c-2.5-1.1-4.7-2.6-6.4-4.5c-1.7-1.9-3.1-4.2-4-6.7            c-0.9-2.5-1.4-5.3-1.4-8.2V25.1h5v32.7c0,2.3,0.4,4.5,1,6.6c0.7,2,1.7,3.8,3,5.2c1.3,1.5,2.9,2.6,4.8,3.5c1.9,0.8,4,1.3,6.4,1.3            c2.4,0,4.6-0.4,6.4-1.2c1.9-0.8,3.5-2,4.8-3.5c1.3-1.5,2.3-3.2,3-5.2c0.7-2,1-4.2,1-6.6V25.1h5v32.7c0,2.9-0.5,5.7-1.4,8.2            c-0.9,2.5-2.3,4.8-4,6.7c-1.7,1.9-3.9,3.4-6.4,4.5C262.3,78.3,259.5,78.8,256.4,78.8z M237.3,26.3v31.5c0,2.8,0.4,5.4,1.3,7.8            c0.9,2.4,2.1,4.5,3.8,6.3c1.6,1.8,3.6,3.2,6,4.2c2.3,1,5,1.5,8,1.5c2.9,0,5.6-0.5,8-1.5c2.3-1,4.4-2.4,6-4.2            c1.6-1.8,2.9-3.9,3.8-6.3c0.9-2.4,1.3-5,1.3-7.8V26.3h-2.5v31.5c0,2.5-0.4,4.8-1.1,7c-0.7,2.2-1.8,4.1-3.3,5.7            c-1.4,1.6-3.2,2.9-5.2,3.8c-2,0.9-4.4,1.4-6.9,1.4c-2.6,0-4.9-0.5-6.9-1.4c-2-0.9-3.8-2.2-5.2-3.8c-1.4-1.6-2.5-3.5-3.2-5.7            c-0.7-2.1-1.1-4.5-1.1-7V26.3H237.3z"/>    </g>    <g>        <path class="st1" d="M297.5,51.3c1,0,0.9,0,0.9,0l2.2,0c2.3,0,4.4-0.3,6.2-0.8c1.8-0.6,3.4-1.3,4.6-2.4c1.3-1,2.2-2.3,2.9-3.7            c0.7-1.4,1-3.1,1-4.9c0-3.7-1.2-6.4-3.6-8.2c-2.4-1.8-5.9-2.7-10.6-2.7h-9.5v22.7v2.8v23.5h-3.7V25.7h13.2c6,0,10.5,1.2,13.4,3.5            c3,2.3,4.4,5.7,4.4,10.2c0,2-0.3,3.8-1,5.4c-0.7,1.6-1.7,3.1-3,4.3c-1.3,1.2-2.8,2.3-4.6,3c-1.8,0.8-3.9,1.3-6.1,1.6            c0.6,0.4,1.1,0.9,1.6,1.5l17.9,22.4h-3.3c-0.4,0-0.7-0.1-1-0.2c-0.3-0.1-0.6-0.4-0.8-0.7l-16.6-21c-0.4-0.5-0.9-0.9-1.3-1.1            c-0.5-0.2-3.4-0.3-4.4-0.3C296.3,51.6,296.7,51.3,297.5,51.3z"/>        <path class="st2" d="M325,78.2h-4.5c-0.5,0-0.9-0.1-1.3-0.3c-0.4-0.2-0.7-0.5-1-0.9l-16.6-21c-0.4-0.5-0.7-0.8-1.1-1            c-0.4-0.1-2.8-0.3-4.1-0.3h-0.6v-2.6c0-0.9,0.2-1.4,1.8-1.4c0.9,0,1,0,1,0l2.2,0c2.2,0,4.2-0.3,6-0.8c1.7-0.5,3.2-1.3,4.4-2.3            c1.2-1,2.1-2.1,2.7-3.5c0.6-1.4,0.9-2.9,0.9-4.6c0-3.5-1.1-6-3.4-7.7c-2.3-1.7-5.7-2.6-10.2-2.6h-8.9v48.9h-5V25.1h13.9            c6.1,0,10.7,1.2,13.8,3.6c3.1,2.4,4.7,6,4.7,10.7c0,2.1-0.4,4-1.1,5.7c-0.7,1.7-1.8,3.2-3.1,4.5c-1.3,1.3-3,2.3-4.8,3.2            c-1.5,0.6-3.1,1.1-4.9,1.4c0.2,0.2,0.4,0.4,0.6,0.7L325,78.2z M296.9,53.5c1.1,0,3.4,0.1,4,0.4c0.6,0.3,1.1,0.7,1.6,1.3l16.6,21            c0.2,0.3,0.4,0.5,0.6,0.6c0.2,0.1,0.4,0.2,0.7,0.2h2l-17.1-21.4c-0.4-0.6-0.9-1-1.4-1.3l-1.5-0.9l1.8-0.2c2.2-0.2,4.2-0.7,5.9-1.5            c1.7-0.8,3.2-1.7,4.5-2.9c1.2-1.2,2.2-2.5,2.8-4.1c0.6-1.6,1-3.3,1-5.2c0-4.3-1.4-7.5-4.2-9.7c-2.8-2.2-7.2-3.3-13-3.3h-12.6V77            h2.5V28h10.1c4.7,0,8.4,0.9,10.9,2.8c2.6,1.9,3.9,4.8,3.9,8.7c0,1.9-0.4,3.6-1,5.1c-0.7,1.5-1.7,2.8-3.1,3.9            c-1.3,1.1-2.9,1.9-4.8,2.5c-1.9,0.6-4,0.9-6.4,0.9l-2.2,0c-0.1,0-0.2,0-0.9,0C297.3,51.9,297,51.9,296.9,53.5z"/>    </g>    <g>        <path class="st1" d="M367.6,68.8c0.2,0,0.5,0.1,0.6,0.3l1.5,1.6c-1.1,1.1-2.2,2.2-3.5,3.1c-1.3,0.9-2.7,1.7-4.2,2.3            c-1.5,0.6-3.2,1.1-4.9,1.5c-1.8,0.4-3.8,0.5-5.9,0.5c-3.6,0-6.9-0.6-9.9-1.9c-3-1.3-5.6-3-7.7-5.4c-2.1-2.3-3.8-5.1-5-8.4            c-1.2-3.3-1.8-6.9-1.8-10.9c0-3.9,0.6-7.5,1.9-10.8c1.2-3.3,3-6,5.2-8.4c2.2-2.3,4.9-4.1,8-5.4c3.1-1.3,6.6-1.9,10.3-1.9            c1.9,0,3.6,0.1,5.2,0.4c1.6,0.3,3,0.7,4.4,1.2c1.4,0.5,2.6,1.2,3.8,2c1.2,0.8,2.4,1.7,3.5,2.7l-1.1,1.6c-0.2,0.3-0.5,0.4-0.9,0.4            c-0.2,0-0.5-0.1-0.8-0.4c-0.3-0.3-0.8-0.6-1.3-1c-0.5-0.4-1.2-0.8-1.9-1.2c-0.7-0.5-1.6-0.9-2.7-1.2c-1-0.4-2.2-0.7-3.6-1            c-1.3-0.3-2.9-0.4-4.6-0.4c-3.2,0-6.1,0.5-8.7,1.6c-2.6,1.1-4.9,2.6-6.8,4.7c-1.9,2-3.4,4.5-4.5,7.3s-1.6,6.1-1.6,9.7            c0,3.7,0.5,6.9,1.6,9.8c1.1,2.9,2.5,5.3,4.4,7.3c1.9,2,4.1,3.5,6.6,4.6c2.5,1.1,5.3,1.6,8.2,1.6c1.9,0,3.5-0.1,5-0.4            c1.5-0.2,2.8-0.6,4-1.1c1.2-0.5,2.4-1.1,3.4-1.8c1.1-0.7,2.1-1.5,3.1-2.5c0.1-0.1,0.2-0.2,0.3-0.2            C367.3,68.9,367.5,68.8,367.6,68.8z"/>        <path class="st2" d="M351.1,78.8c-3.7,0-7.1-0.7-10.1-1.9c-3.1-1.3-5.7-3.1-7.9-5.5c-2.2-2.4-3.9-5.2-5.1-8.6            c-1.2-3.3-1.8-7.1-1.8-11.1c0-4,0.6-7.7,1.9-11c1.3-3.3,3.1-6.2,5.3-8.6c2.3-2.4,5.1-4.3,8.2-5.6c3.2-1.3,6.7-2,10.6-2            c1.9,0,3.7,0.1,5.3,0.4c1.6,0.3,3.1,0.7,4.5,1.2c1.4,0.5,2.7,1.2,3.9,2c1.2,0.8,2.4,1.7,3.6,2.8l0.4,0.4l-1.4,2.1            c-0.2,0.3-0.6,0.7-1.4,0.7c-0.4,0-0.7-0.2-1.2-0.5c-0.3-0.3-0.8-0.6-1.3-0.9c-0.5-0.4-1.1-0.8-1.9-1.2c-0.7-0.4-1.6-0.8-2.6-1.2            c-1-0.4-2.2-0.7-3.5-0.9c-1.3-0.2-2.8-0.4-4.5-0.4c-3.1,0-5.9,0.5-8.5,1.6c-2.5,1.1-4.8,2.6-6.6,4.5c-1.8,1.9-3.3,4.3-4.3,7.1            c-1,2.8-1.6,6-1.6,9.4c0,3.6,0.5,6.8,1.5,9.6c1,2.8,2.4,5.2,4.2,7.1c1.8,1.9,3.9,3.4,6.4,4.4c2.4,1,5.1,1.5,8,1.5            c1.8,0,3.5-0.1,4.9-0.4c1.4-0.2,2.7-0.6,3.9-1.1c1.2-0.5,2.3-1.1,3.3-1.7c1-0.7,2-1.5,3-2.4c0.2-0.2,0.3-0.2,0.5-0.3            c0.5-0.3,1.3-0.2,1.7,0.3l1.9,2l-0.4,0.4c-1.1,1.2-2.3,2.2-3.6,3.2c-1.3,0.9-2.7,1.8-4.3,2.4c-1.5,0.7-3.2,1.2-5.1,1.5            C355.3,78.6,353.3,78.8,351.1,78.8z M352.2,25.7c-3.7,0-7.1,0.6-10.1,1.9c-3,1.2-5.7,3-7.8,5.3c-2.2,2.3-3.9,5-5.1,8.2            c-1.2,3.2-1.8,6.7-1.8,10.6c0,3.9,0.6,7.5,1.8,10.7c1.2,3.2,2.8,5.9,4.9,8.2c2.1,2.2,4.6,4,7.5,5.2c2.9,1.2,6.1,1.8,9.6,1.8            c2.1,0,4-0.2,5.8-0.5c1.7-0.3,3.4-0.8,4.8-1.5c1.5-0.6,2.8-1.4,4-2.3c1.1-0.8,2.1-1.7,3-2.6l-1.1-1.2c-0.1-0.1-0.2-0.1-0.3,0            c-0.1,0-0.2,0.1-0.3,0.2c-1,0.9-2.1,1.8-3.2,2.5c-1.1,0.7-2.3,1.4-3.5,1.9c-1.3,0.5-2.7,0.9-4.1,1.1c-1.5,0.2-3.2,0.4-5.1,0.4            c-3,0-5.9-0.6-8.5-1.6c-2.6-1.1-4.9-2.7-6.8-4.7c-1.9-2-3.4-4.6-4.5-7.5c-1.1-2.9-1.6-6.3-1.6-10c0-3.6,0.5-6.9,1.6-9.9            c1.1-2.9,2.6-5.5,4.6-7.5c2-2.1,4.3-3.7,7-4.8c2.7-1.1,5.7-1.7,8.9-1.7c1.7,0,3.3,0.1,4.7,0.4c1.4,0.3,2.6,0.6,3.7,1            c1.1,0.4,2,0.8,2.8,1.3c0.8,0.5,1.4,0.9,1.9,1.3c0.5,0.4,1,0.7,1.3,1c0.3,0.3,0.5,0.3,0.5,0.3c0.3,0,0.4-0.1,0.4-0.2l0.8-1.2            c-1-0.9-2-1.6-3-2.3c-1.2-0.8-2.4-1.4-3.7-1.9c-1.3-0.5-2.8-0.9-4.3-1.2C355.7,25.9,354,25.7,352.2,25.7z"/>    </g>    <g>        <path class="st1" d="M410.3,25.7v3.1H383v21h22.7v3H383v21.6h27.3v3.1h-31.1V25.7H410.3z"/>        <path class="st2" d="M410.9,78.2h-32.3V25.1h32.3v4.3h-27.3v19.7h22.7v4.3h-22.7v20.4h27.3V78.2z M379.8,77h29.9v-1.9h-27.3V52.2            h22.7v-1.8h-22.7V28.2h27.3v-1.9h-29.9V77z"/>    </g>    <g>        <path class="st1" d="M456.8,25.1V33h-23.5v15.7h19.8v7.9h-19.8v21.6h-9.9v-53H456.8z"/>    </g>    <g>        <path class="st1" d="M514.3,51.6c0,3.9-0.6,7.5-1.9,10.8c-1.3,3.3-3.1,6.2-5.5,8.6c-2.3,2.4-5.2,4.3-8.5,5.7c-3.3,1.4-7,2-11,2            c-4,0-7.7-0.7-11-2c-3.3-1.4-6.1-3.2-8.5-5.7c-2.4-2.4-4.2-5.3-5.5-8.6s-1.9-6.9-1.9-10.8s0.6-7.5,1.9-10.8            c1.3-3.3,3.1-6.2,5.5-8.6c2.4-2.4,5.2-4.3,8.5-5.7c3.3-1.4,7-2,11-2c4,0,7.7,0.7,11,2.1c3.3,1.4,6.1,3.3,8.5,5.7            c2.3,2.4,4.2,5.3,5.5,8.6C513.6,44.1,514.3,47.7,514.3,51.6z M504.2,51.6c0-2.9-0.4-5.5-1.2-7.8c-0.8-2.3-1.9-4.3-3.3-5.9            c-1.4-1.6-3.2-2.8-5.3-3.7c-2.1-0.9-4.4-1.3-7-1.3c-2.6,0-4.9,0.4-7,1.3c-2.1,0.9-3.8,2.1-5.3,3.7c-1.5,1.6-2.6,3.6-3.4,5.9            c-0.8,2.3-1.2,4.9-1.2,7.8s0.4,5.5,1.2,7.8c0.8,2.3,1.9,4.3,3.4,5.9c1.5,1.6,3.2,2.8,5.3,3.7c2.1,0.9,4.4,1.3,7,1.3            c2.6,0,4.9-0.4,7-1.3c2.1-0.9,3.8-2.1,5.3-3.7c1.4-1.6,2.5-3.6,3.3-5.9C503.8,57.1,504.2,54.5,504.2,51.6z"/>    </g>    <g>        <path class="st1" d="M534.9,50.4l2.3,0c1.9,0,3.5-0.2,4.9-0.7c1.4-0.5,2.5-1.1,3.4-1.9c0.9-0.8,1.6-1.8,2-2.9            c0.4-1.1,0.7-2.4,0.7-3.7c0-2.7-0.9-4.8-2.7-6.2c-1.8-1.4-4.5-2.2-8.1-2.2H531v17.6v7.1v20.7h-9.9v-53h16.2c3.6,0,6.7,0.4,9.3,1.1            c2.6,0.7,4.7,1.8,6.3,3.1c1.6,1.3,2.9,3,3.6,4.8c0.8,1.9,1.2,3.9,1.2,6.2c0,1.8-0.3,3.5-0.8,5.1c-0.5,1.6-1.3,3-2.3,4.3            c-1,1.3-2.2,2.4-3.7,3.4c-1.5,1-3.1,1.8-5,2.3c1.2,0.7,2.3,1.7,3.2,3l13.3,19.6h-8.9c-0.9,0-1.6-0.2-2.2-0.5            c-0.6-0.3-1.1-0.8-1.5-1.5c0,0-11.1-17-11.1-17c-0.3-0.4-0.9-1.3-1.5-1.4c-1.2,0-2.4,0-3.5,0c0,0,0-6,0-6.4            C533.8,50.4,534.9,50.4,534.9,50.4z"/>    </g>    <g>        <path class="st1" d="M591.4,70.9c2.2,0,4.2-0.2,5.8-0.6c1.6-0.4,3.2-1,4.7-1.7v-12h-6.6c-0.6,0-1.1-0.2-1.5-0.5            c-0.4-0.4-0.6-0.8-0.6-1.3v-5.6h17.6V73c-1.3,1-2.7,1.8-4.2,2.5c-1.5,0.7-3,1.3-4.7,1.8c-1.7,0.5-3.4,0.8-5.3,1            c-1.9,0.2-3.9,0.3-6.1,0.3c-3.9,0-7.4-0.7-10.7-2c-3.3-1.3-6.1-3.2-8.4-5.6c-2.4-2.4-4.2-5.3-5.6-8.6c-1.3-3.3-2-7-2-10.9            c0-4,0.6-7.6,1.9-11c1.3-3.3,3.1-6.2,5.5-8.6c2.4-2.4,5.3-4.3,8.7-5.6c3.4-1.3,7.2-2,11.4-2c4.3,0,8.1,0.6,11.2,1.9            c3.2,1.3,5.8,3,8,5l-2.9,4.5c-0.6,0.9-1.3,1.4-2.2,1.4c-0.6,0-1.2-0.2-1.8-0.6c-0.8-0.5-1.6-0.9-2.4-1.4c-0.8-0.5-1.7-0.9-2.7-1.2            c-1-0.3-2.1-0.6-3.3-0.8c-1.2-0.2-2.7-0.3-4.3-0.3c-2.6,0-5,0.4-7.1,1.3c-2.1,0.9-3.9,2.1-5.4,3.8c-1.5,1.6-2.6,3.6-3.4,5.9            c-0.8,2.3-1.2,4.9-1.2,7.7c0,3.1,0.4,5.8,1.3,8.2c0.9,2.4,2.1,4.4,3.6,6s3.4,2.9,5.5,3.8S588.9,70.9,591.4,70.9z"/>    </g>    <g>        <path class="st1" d="M645.7,56.8h-16.1v13.4H653v7.9h-33.4v-53H653V33h-23.5v16.3H648v5.8C648,55.1,647.9,56.8,645.7,56.8z"/>    </g></g></svg>
-            </a>
-            <div class="title-bar-right">
-                <button type="button" class="menu-icon" data-toggle="offCanvas"></button>
-            </div>
-        </div>
-    </section>
-    <section class="sandiego l-header-nav-bottom">
-        <nav class="row">
-            <a href="/" title="Home" class="sf-logo">
-                
-
-<svg  version="1.1"  xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"     viewBox="0 0 653 102.6" style="enable-background:new 0 0 653 102.6;" xml:space="preserve"><path class="st0" d="M66.9,54.5c0-19.1-6.8-27.8-10.4-31.1c-0.7-0.6-1.8-0.1-1.7,0.9c0.7,10.8-12.9,13.5-12.9,30.4h0    c0,0,0,0.1,0,0.1c0,10.3,7.8,18.7,17.4,18.7c9.6,0,17.4-8.4,17.4-18.7c0,0,0-0.1,0-0.1h0c0-4.8-1.8-9.4-3.6-12.8    c-0.4-0.7-1.4-0.4-1.3,0.2C75.1,56.7,66.9,65.7,66.9,54.5z"/><g>    <path class="st0" d="M46.2,94.8c-0.4,0-0.9-0.2-1.2-0.5L0.5,49.8c-0.6-0.6-0.6-1.7,0-2.4l47-47C47.8,0.2,48.2,0,48.6,0h13.5        c0.8,0,1.3,0.5,1.5,1c0.2,0.5,0.2,1.2-0.4,1.8L19.1,47c-0.9,0.9-0.9,2.3,0,3.2L54,85.2c0.6,0.6,0.6,1.7,0,2.4l-6.7,6.8        C47,94.6,46.6,94.8,46.2,94.8z"/></g><g>    <path class="st0" d="M55.1,102.6c-0.8,0-1.3-0.5-1.5-1c-0.2-0.5-0.2-1.2,0.4-1.8l44.2-44.2c0.4-0.4,0.7-1,0.7-1.6        c0-0.6-0.2-1.2-0.7-1.6L63.2,17.4c-0.6-0.6-0.6-1.7,0-2.4l6.8-6.8c0.3-0.3,0.7-0.5,1.2-0.5S72,8,72.3,8.3l44.4,44.5        c0.3,0.3,0.5,0.7,0.5,1.2s-0.2,0.9-0.5,1.2l-47,47c-0.3,0.3-0.7,0.5-1.2,0.5H55.1z"/></g><g>    <g>        <path class="st1" d="M167.2,32c-0.2,0.4-0.5,0.6-1,0.6c-0.3,0-0.7-0.2-1.2-0.7c-0.5-0.5-1.2-1-2-1.5c-0.9-0.6-1.9-1.1-3.2-1.5            c-1.3-0.5-2.9-0.7-4.8-0.7c-1.9,0-3.5,0.3-5,0.8c-1.4,0.5-2.6,1.3-3.6,2.2s-1.7,2-2.2,3.2c-0.5,1.2-0.8,2.5-0.8,3.8            c0,1.8,0.4,3.2,1.1,4.4c0.7,1.1,1.7,2.1,3,2.9c1.2,0.8,2.6,1.5,4.2,2c1.6,0.6,3.2,1.1,4.8,1.6c1.6,0.5,3.2,1.1,4.8,1.8            c1.6,0.6,2.9,1.5,4.2,2.4s2.2,2.2,3,3.6c0.7,1.4,1.1,3.2,1.1,5.3c0,2.2-0.4,4.2-1.1,6.1c-0.7,1.9-1.8,3.6-3.2,5            c-1.4,1.4-3.2,2.5-5.2,3.4c-2.1,0.8-4.4,1.2-7,1.2c-3.4,0-6.4-0.6-8.8-1.8c-2.5-1.2-4.6-2.9-6.5-5l1-1.6c0.3-0.4,0.6-0.5,1-0.5            c0.2,0,0.5,0.1,0.8,0.4c0.3,0.3,0.8,0.7,1.2,1.1c0.5,0.4,1.1,0.9,1.8,1.4c0.7,0.5,1.5,1,2.4,1.4c0.9,0.4,1.9,0.8,3.1,1.1            c1.2,0.3,2.5,0.4,4,0.4c2.1,0,3.9-0.3,5.5-0.9c1.6-0.6,3-1.5,4.1-2.5s2-2.4,2.6-3.8c0.6-1.5,0.9-3.1,0.9-4.7            c0-1.8-0.4-3.3-1.1-4.5c-0.7-1.2-1.7-2.2-3-3c-1.2-0.8-2.6-1.5-4.2-2c-1.6-0.5-3.2-1.1-4.8-1.6c-1.6-0.5-3.2-1.1-4.8-1.7            c-1.6-0.6-2.9-1.4-4.2-2.4c-1.2-1-2.2-2.2-3-3.7c-0.7-1.5-1.1-3.3-1.1-5.6c0-1.7,0.3-3.4,1-5c0.7-1.6,1.6-3,2.9-4.3            c1.3-1.2,2.8-2.2,4.7-3c1.9-0.7,4-1.1,6.4-1.1c2.7,0,5.1,0.4,7.3,1.3c2.1,0.9,4.1,2.2,5.9,3.9L167.2,32z"/>        <path class="st2" d="M152.9,78.8c-3.5,0-6.6-0.6-9.1-1.9c-2.5-1.2-4.8-3-6.7-5.1l-0.3-0.3l1.3-2c0.6-0.7,1.1-0.8,1.5-0.8            c0.4,0,0.8,0.2,1.2,0.6c0.3,0.3,0.8,0.7,1.3,1.1c0.5,0.4,1.1,0.9,1.7,1.4c0.7,0.5,1.4,0.9,2.3,1.3c0.9,0.4,1.9,0.8,3,1            c1.1,0.3,2.4,0.4,3.9,0.4c2,0,3.8-0.3,5.3-0.9c1.5-0.6,2.8-1.4,3.9-2.4c1-1,1.9-2.2,2.4-3.6c0.6-1.4,0.8-2.9,0.8-4.5            c0-1.7-0.3-3.1-1-4.2c-0.7-1.1-1.6-2-2.8-2.8c-1.2-0.8-2.5-1.4-4-1.9c-1.5-0.5-3.1-1.1-4.8-1.6c-1.7-0.5-3.3-1.1-4.8-1.7            c-1.6-0.7-3.1-1.5-4.3-2.5c-1.3-1-2.3-2.4-3.1-3.9c-0.8-1.6-1.2-3.5-1.2-5.8c0-1.8,0.3-3.6,1-5.3c0.7-1.7,1.7-3.2,3-4.5            c1.3-1.3,3-2.3,4.9-3.1c1.9-0.8,4.2-1.2,6.6-1.2c2.8,0,5.3,0.4,7.5,1.3c2.2,0.9,4.2,2.3,6.1,4.1l0.3,0.3l-1.1,2.1            c-0.6,1.1-1.7,1.4-3.1,0.1c-0.5-0.4-1.1-0.9-2-1.4c-0.8-0.5-1.9-1-3.1-1.5c-1.2-0.4-2.7-0.7-4.6-0.7c-1.8,0-3.4,0.3-4.8,0.8            c-1.3,0.5-2.5,1.2-3.4,2.1c-0.9,0.9-1.6,1.9-2.1,3c-0.5,1.1-0.7,2.4-0.7,3.6c0,1.6,0.3,3,1,4c0.7,1.1,1.6,2,2.8,2.8            c1.2,0.8,2.5,1.4,4,2c1.5,0.5,3.1,1.1,4.8,1.6c1.6,0.5,3.3,1.1,4.8,1.8c1.6,0.7,3.1,1.5,4.3,2.5c1.3,1,2.3,2.3,3.1,3.8            c0.8,1.5,1.2,3.4,1.2,5.6c0,2.2-0.4,4.4-1.2,6.4c-0.8,2-1.9,3.7-3.4,5.2c-1.5,1.5-3.3,2.6-5.4,3.5            C158.1,78.3,155.6,78.8,152.9,78.8z M138.4,71.3c1.7,1.9,3.7,3.4,6,4.5c2.4,1.2,5.3,1.8,8.6,1.8c2.5,0,4.8-0.4,6.8-1.2            c2-0.8,3.6-1.9,5-3.2c1.3-1.3,2.4-3,3.1-4.8c0.7-1.8,1.1-3.8,1.1-5.9c0-2-0.4-3.7-1-5.1c-0.7-1.3-1.6-2.5-2.8-3.4            c-1.2-0.9-2.5-1.7-4-2.4c-1.5-0.6-3.1-1.2-4.7-1.8c-1.6-0.5-3.2-1.1-4.8-1.6c-1.6-0.6-3-1.3-4.3-2.1c-1.3-0.8-2.3-1.9-3.1-3.1            c-0.8-1.2-1.2-2.8-1.2-4.7c0-1.4,0.3-2.8,0.8-4.1c0.5-1.3,1.3-2.5,2.3-3.4c1-1,2.3-1.8,3.8-2.3c1.5-0.6,3.3-0.8,5.2-0.8            c1.9,0,3.6,0.2,5,0.7c1.3,0.5,2.5,1,3.3,1.6c0.9,0.6,1.6,1.1,2.1,1.6c0.6,0.5,0.8,0.5,0.8,0.5c0.1,0,0.3,0,0.4-0.3l0.7-1.3            c-1.6-1.5-3.4-2.7-5.3-3.5c-2.1-0.8-4.4-1.2-7-1.2c-2.3,0-4.4,0.4-6.2,1.1c-1.8,0.7-3.3,1.7-4.5,2.8c-1.2,1.2-2.1,2.5-2.8,4.1            c-0.6,1.5-0.9,3.1-0.9,4.8c0,2.1,0.4,3.9,1.1,5.3c0.7,1.4,1.6,2.6,2.8,3.5c1.2,0.9,2.5,1.7,4,2.3c1.5,0.6,3.1,1.2,4.7,1.7            c1.6,0.5,3.2,1,4.8,1.6c1.6,0.6,3,1.2,4.3,2.1c1.3,0.8,2.4,1.9,3.1,3.2c0.8,1.3,1.2,2.9,1.2,4.9c0,1.8-0.3,3.4-0.9,5            c-0.6,1.6-1.5,2.9-2.7,4c-1.2,1.1-2.6,2-4.3,2.7c-1.7,0.6-3.6,1-5.7,1c-1.5,0-2.9-0.2-4.2-0.5c-1.2-0.3-2.3-0.7-3.2-1.1            c-0.9-0.4-1.8-0.9-2.5-1.5c-0.7-0.5-1.3-1-1.8-1.4c-0.5-0.4-0.9-0.8-1.2-1.1c-0.3-0.3-0.5-0.3-0.5-0.3c-0.1,0-0.3,0-0.5,0.3            L138.4,71.3z"/>    </g>    <g>        <path class="st1" d="M226.7,51.6c0,4-0.6,7.6-1.8,10.9c-1.2,3.3-2.9,6.1-5.1,8.4c-2.2,2.3-4.8,4.1-7.8,5.4            c-3,1.3-6.4,1.9-10.1,1.9c-3.6,0-7-0.6-10-1.9c-3-1.3-5.6-3-7.8-5.4c-2.2-2.3-3.9-5.1-5.1-8.4c-1.2-3.3-1.8-6.9-1.8-10.9            c0-4,0.6-7.6,1.8-10.9c1.2-3.3,2.9-6.1,5.1-8.4c2.2-2.3,4.8-4.1,7.8-5.4c3-1.3,6.4-1.9,10-1.9c3.7,0,7.1,0.6,10.1,1.9            c3,1.3,5.6,3,7.8,5.4c2.2,2.3,3.9,5.1,5.1,8.4C226.1,44,226.7,47.6,226.7,51.6z M222.8,51.6c0-3.6-0.5-6.9-1.5-9.8            c-1-2.9-2.4-5.3-4.2-7.3c-1.8-2-4-3.5-6.6-4.6c-2.6-1.1-5.4-1.6-8.5-1.6c-3.1,0-5.9,0.5-8.5,1.6c-2.6,1.1-4.8,2.6-6.6,4.6            c-1.8,2-3.3,4.4-4.3,7.3c-1,2.9-1.5,6.1-1.5,9.8c0,3.6,0.5,6.9,1.5,9.8c1,2.9,2.4,5.3,4.3,7.3c1.8,2,4,3.5,6.6,4.6            c2.6,1.1,5.4,1.6,8.5,1.6c3.1,0,6-0.5,8.5-1.6c2.6-1,4.8-2.6,6.6-4.6c1.8-2,3.2-4.4,4.2-7.3C222.3,58.5,222.8,55.3,222.8,51.6z"/>        <path class="st2" d="M202,78.7c-3.7,0-7.2-0.7-10.2-1.9c-3.1-1.3-5.8-3.1-8-5.5c-2.2-2.4-4-5.2-5.2-8.6c-1.2-3.3-1.9-7.1-1.9-11.1            c0-4,0.6-7.8,1.9-11.1c1.2-3.3,3-6.2,5.2-8.6c2.2-2.4,4.9-4.2,8-5.5c3.1-1.3,6.5-2,10.2-2c3.8,0,7.2,0.7,10.3,1.9            c3.1,1.3,5.8,3.1,8,5.5c2.2,2.4,4,5.3,5.2,8.6c1.2,3.3,1.8,7,1.8,11.1c0,4.1-0.6,7.8-1.8,11.1c-1.2,3.3-3,6.2-5.2,8.6            c-2.2,2.4-4.9,4.2-8,5.5C209.2,78.1,205.7,78.7,202,78.7z M202,25.7c-3.5,0-6.8,0.6-9.8,1.9c-2.9,1.2-5.5,3-7.6,5.2            c-2.1,2.2-3.8,5-4.9,8.2c-1.2,3.2-1.8,6.8-1.8,10.7c0,3.9,0.6,7.5,1.8,10.7c1.2,3.2,2.8,5.9,4.9,8.2c2.1,2.2,4.7,4,7.6,5.2            c2.9,1.2,6.2,1.8,9.8,1.8c3.6,0,6.9-0.6,9.8-1.8c2.9-1.2,5.5-3,7.6-5.2c2.1-2.2,3.8-5,4.9-8.1c1.2-3.2,1.8-6.8,1.8-10.7            c0-3.9-0.6-7.5-1.8-10.7c-1.2-3.2-2.8-5.9-4.9-8.2c-2.1-2.2-4.7-4-7.6-5.2C208.9,26.3,205.6,25.7,202,25.7z"/>    </g>    <g>        <path class="st1" d="M256.4,74.9c2.5,0,4.7-0.4,6.7-1.3c2-0.9,3.6-2.1,5-3.6c1.4-1.5,2.4-3.4,3.1-5.4c0.7-2.1,1.1-4.3,1.1-6.8            V25.7h3.7v32.1c0,2.9-0.5,5.5-1.4,8c-0.9,2.5-2.2,4.6-3.9,6.5c-1.7,1.8-3.8,3.3-6.2,4.3c-2.4,1-5.2,1.6-8.2,1.6            c-3,0-5.8-0.5-8.2-1.6c-2.4-1.1-4.5-2.5-6.2-4.3c-1.7-1.8-3-4-3.9-6.5c-0.9-2.5-1.4-5.2-1.4-8V25.7h3.8v32c0,2.4,0.4,4.7,1.1,6.8            c0.7,2.1,1.8,3.9,3.1,5.4c1.4,1.5,3,2.7,5,3.6C251.6,74.5,253.9,74.9,256.4,74.9z"/>        <path class="st2" d="M256.4,78.8c-3.1,0-5.9-0.5-8.4-1.6c-2.5-1.1-4.7-2.6-6.4-4.5c-1.7-1.9-3.1-4.2-4-6.7            c-0.9-2.5-1.4-5.3-1.4-8.2V25.1h5v32.7c0,2.3,0.4,4.5,1,6.6c0.7,2,1.7,3.8,3,5.2c1.3,1.5,2.9,2.6,4.8,3.5c1.9,0.8,4,1.3,6.4,1.3            c2.4,0,4.6-0.4,6.4-1.2c1.9-0.8,3.5-2,4.8-3.5c1.3-1.5,2.3-3.2,3-5.2c0.7-2,1-4.2,1-6.6V25.1h5v32.7c0,2.9-0.5,5.7-1.4,8.2            c-0.9,2.5-2.3,4.8-4,6.7c-1.7,1.9-3.9,3.4-6.4,4.5C262.3,78.3,259.5,78.8,256.4,78.8z M237.3,26.3v31.5c0,2.8,0.4,5.4,1.3,7.8            c0.9,2.4,2.1,4.5,3.8,6.3c1.6,1.8,3.6,3.2,6,4.2c2.3,1,5,1.5,8,1.5c2.9,0,5.6-0.5,8-1.5c2.3-1,4.4-2.4,6-4.2            c1.6-1.8,2.9-3.9,3.8-6.3c0.9-2.4,1.3-5,1.3-7.8V26.3h-2.5v31.5c0,2.5-0.4,4.8-1.1,7c-0.7,2.2-1.8,4.1-3.3,5.7            c-1.4,1.6-3.2,2.9-5.2,3.8c-2,0.9-4.4,1.4-6.9,1.4c-2.6,0-4.9-0.5-6.9-1.4c-2-0.9-3.8-2.2-5.2-3.8c-1.4-1.6-2.5-3.5-3.2-5.7            c-0.7-2.1-1.1-4.5-1.1-7V26.3H237.3z"/>    </g>    <g>        <path class="st1" d="M297.5,51.3c1,0,0.9,0,0.9,0l2.2,0c2.3,0,4.4-0.3,6.2-0.8c1.8-0.6,3.4-1.3,4.6-2.4c1.3-1,2.2-2.3,2.9-3.7            c0.7-1.4,1-3.1,1-4.9c0-3.7-1.2-6.4-3.6-8.2c-2.4-1.8-5.9-2.7-10.6-2.7h-9.5v22.7v2.8v23.5h-3.7V25.7h13.2c6,0,10.5,1.2,13.4,3.5            c3,2.3,4.4,5.7,4.4,10.2c0,2-0.3,3.8-1,5.4c-0.7,1.6-1.7,3.1-3,4.3c-1.3,1.2-2.8,2.3-4.6,3c-1.8,0.8-3.9,1.3-6.1,1.6            c0.6,0.4,1.1,0.9,1.6,1.5l17.9,22.4h-3.3c-0.4,0-0.7-0.1-1-0.2c-0.3-0.1-0.6-0.4-0.8-0.7l-16.6-21c-0.4-0.5-0.9-0.9-1.3-1.1            c-0.5-0.2-3.4-0.3-4.4-0.3C296.3,51.6,296.7,51.3,297.5,51.3z"/>        <path class="st2" d="M325,78.2h-4.5c-0.5,0-0.9-0.1-1.3-0.3c-0.4-0.2-0.7-0.5-1-0.9l-16.6-21c-0.4-0.5-0.7-0.8-1.1-1            c-0.4-0.1-2.8-0.3-4.1-0.3h-0.6v-2.6c0-0.9,0.2-1.4,1.8-1.4c0.9,0,1,0,1,0l2.2,0c2.2,0,4.2-0.3,6-0.8c1.7-0.5,3.2-1.3,4.4-2.3            c1.2-1,2.1-2.1,2.7-3.5c0.6-1.4,0.9-2.9,0.9-4.6c0-3.5-1.1-6-3.4-7.7c-2.3-1.7-5.7-2.6-10.2-2.6h-8.9v48.9h-5V25.1h13.9            c6.1,0,10.7,1.2,13.8,3.6c3.1,2.4,4.7,6,4.7,10.7c0,2.1-0.4,4-1.1,5.7c-0.7,1.7-1.8,3.2-3.1,4.5c-1.3,1.3-3,2.3-4.8,3.2            c-1.5,0.6-3.1,1.1-4.9,1.4c0.2,0.2,0.4,0.4,0.6,0.7L325,78.2z M296.9,53.5c1.1,0,3.4,0.1,4,0.4c0.6,0.3,1.1,0.7,1.6,1.3l16.6,21            c0.2,0.3,0.4,0.5,0.6,0.6c0.2,0.1,0.4,0.2,0.7,0.2h2l-17.1-21.4c-0.4-0.6-0.9-1-1.4-1.3l-1.5-0.9l1.8-0.2c2.2-0.2,4.2-0.7,5.9-1.5            c1.7-0.8,3.2-1.7,4.5-2.9c1.2-1.2,2.2-2.5,2.8-4.1c0.6-1.6,1-3.3,1-5.2c0-4.3-1.4-7.5-4.2-9.7c-2.8-2.2-7.2-3.3-13-3.3h-12.6V77            h2.5V28h10.1c4.7,0,8.4,0.9,10.9,2.8c2.6,1.9,3.9,4.8,3.9,8.7c0,1.9-0.4,3.6-1,5.1c-0.7,1.5-1.7,2.8-3.1,3.9            c-1.3,1.1-2.9,1.9-4.8,2.5c-1.9,0.6-4,0.9-6.4,0.9l-2.2,0c-0.1,0-0.2,0-0.9,0C297.3,51.9,297,51.9,296.9,53.5z"/>    </g>    <g>        <path class="st1" d="M367.6,68.8c0.2,0,0.5,0.1,0.6,0.3l1.5,1.6c-1.1,1.1-2.2,2.2-3.5,3.1c-1.3,0.9-2.7,1.7-4.2,2.3            c-1.5,0.6-3.2,1.1-4.9,1.5c-1.8,0.4-3.8,0.5-5.9,0.5c-3.6,0-6.9-0.6-9.9-1.9c-3-1.3-5.6-3-7.7-5.4c-2.1-2.3-3.8-5.1-5-8.4            c-1.2-3.3-1.8-6.9-1.8-10.9c0-3.9,0.6-7.5,1.9-10.8c1.2-3.3,3-6,5.2-8.4c2.2-2.3,4.9-4.1,8-5.4c3.1-1.3,6.6-1.9,10.3-1.9            c1.9,0,3.6,0.1,5.2,0.4c1.6,0.3,3,0.7,4.4,1.2c1.4,0.5,2.6,1.2,3.8,2c1.2,0.8,2.4,1.7,3.5,2.7l-1.1,1.6c-0.2,0.3-0.5,0.4-0.9,0.4            c-0.2,0-0.5-0.1-0.8-0.4c-0.3-0.3-0.8-0.6-1.3-1c-0.5-0.4-1.2-0.8-1.9-1.2c-0.7-0.5-1.6-0.9-2.7-1.2c-1-0.4-2.2-0.7-3.6-1            c-1.3-0.3-2.9-0.4-4.6-0.4c-3.2,0-6.1,0.5-8.7,1.6c-2.6,1.1-4.9,2.6-6.8,4.7c-1.9,2-3.4,4.5-4.5,7.3s-1.6,6.1-1.6,9.7            c0,3.7,0.5,6.9,1.6,9.8c1.1,2.9,2.5,5.3,4.4,7.3c1.9,2,4.1,3.5,6.6,4.6c2.5,1.1,5.3,1.6,8.2,1.6c1.9,0,3.5-0.1,5-0.4            c1.5-0.2,2.8-0.6,4-1.1c1.2-0.5,2.4-1.1,3.4-1.8c1.1-0.7,2.1-1.5,3.1-2.5c0.1-0.1,0.2-0.2,0.3-0.2            C367.3,68.9,367.5,68.8,367.6,68.8z"/>        <path class="st2" d="M351.1,78.8c-3.7,0-7.1-0.7-10.1-1.9c-3.1-1.3-5.7-3.1-7.9-5.5c-2.2-2.4-3.9-5.2-5.1-8.6            c-1.2-3.3-1.8-7.1-1.8-11.1c0-4,0.6-7.7,1.9-11c1.3-3.3,3.1-6.2,5.3-8.6c2.3-2.4,5.1-4.3,8.2-5.6c3.2-1.3,6.7-2,10.6-2            c1.9,0,3.7,0.1,5.3,0.4c1.6,0.3,3.1,0.7,4.5,1.2c1.4,0.5,2.7,1.2,3.9,2c1.2,0.8,2.4,1.7,3.6,2.8l0.4,0.4l-1.4,2.1            c-0.2,0.3-0.6,0.7-1.4,0.7c-0.4,0-0.7-0.2-1.2-0.5c-0.3-0.3-0.8-0.6-1.3-0.9c-0.5-0.4-1.1-0.8-1.9-1.2c-0.7-0.4-1.6-0.8-2.6-1.2            c-1-0.4-2.2-0.7-3.5-0.9c-1.3-0.2-2.8-0.4-4.5-0.4c-3.1,0-5.9,0.5-8.5,1.6c-2.5,1.1-4.8,2.6-6.6,4.5c-1.8,1.9-3.3,4.3-4.3,7.1            c-1,2.8-1.6,6-1.6,9.4c0,3.6,0.5,6.8,1.5,9.6c1,2.8,2.4,5.2,4.2,7.1c1.8,1.9,3.9,3.4,6.4,4.4c2.4,1,5.1,1.5,8,1.5            c1.8,0,3.5-0.1,4.9-0.4c1.4-0.2,2.7-0.6,3.9-1.1c1.2-0.5,2.3-1.1,3.3-1.7c1-0.7,2-1.5,3-2.4c0.2-0.2,0.3-0.2,0.5-0.3            c0.5-0.3,1.3-0.2,1.7,0.3l1.9,2l-0.4,0.4c-1.1,1.2-2.3,2.2-3.6,3.2c-1.3,0.9-2.7,1.8-4.3,2.4c-1.5,0.7-3.2,1.2-5.1,1.5            C355.3,78.6,353.3,78.8,351.1,78.8z M352.2,25.7c-3.7,0-7.1,0.6-10.1,1.9c-3,1.2-5.7,3-7.8,5.3c-2.2,2.3-3.9,5-5.1,8.2            c-1.2,3.2-1.8,6.7-1.8,10.6c0,3.9,0.6,7.5,1.8,10.7c1.2,3.2,2.8,5.9,4.9,8.2c2.1,2.2,4.6,4,7.5,5.2c2.9,1.2,6.1,1.8,9.6,1.8            c2.1,0,4-0.2,5.8-0.5c1.7-0.3,3.4-0.8,4.8-1.5c1.5-0.6,2.8-1.4,4-2.3c1.1-0.8,2.1-1.7,3-2.6l-1.1-1.2c-0.1-0.1-0.2-0.1-0.3,0            c-0.1,0-0.2,0.1-0.3,0.2c-1,0.9-2.1,1.8-3.2,2.5c-1.1,0.7-2.3,1.4-3.5,1.9c-1.3,0.5-2.7,0.9-4.1,1.1c-1.5,0.2-3.2,0.4-5.1,0.4            c-3,0-5.9-0.6-8.5-1.6c-2.6-1.1-4.9-2.7-6.8-4.7c-1.9-2-3.4-4.6-4.5-7.5c-1.1-2.9-1.6-6.3-1.6-10c0-3.6,0.5-6.9,1.6-9.9            c1.1-2.9,2.6-5.5,4.6-7.5c2-2.1,4.3-3.7,7-4.8c2.7-1.1,5.7-1.7,8.9-1.7c1.7,0,3.3,0.1,4.7,0.4c1.4,0.3,2.6,0.6,3.7,1            c1.1,0.4,2,0.8,2.8,1.3c0.8,0.5,1.4,0.9,1.9,1.3c0.5,0.4,1,0.7,1.3,1c0.3,0.3,0.5,0.3,0.5,0.3c0.3,0,0.4-0.1,0.4-0.2l0.8-1.2            c-1-0.9-2-1.6-3-2.3c-1.2-0.8-2.4-1.4-3.7-1.9c-1.3-0.5-2.8-0.9-4.3-1.2C355.7,25.9,354,25.7,352.2,25.7z"/>    </g>    <g>        <path class="st1" d="M410.3,25.7v3.1H383v21h22.7v3H383v21.6h27.3v3.1h-31.1V25.7H410.3z"/>        <path class="st2" d="M410.9,78.2h-32.3V25.1h32.3v4.3h-27.3v19.7h22.7v4.3h-22.7v20.4h27.3V78.2z M379.8,77h29.9v-1.9h-27.3V52.2            h22.7v-1.8h-22.7V28.2h27.3v-1.9h-29.9V77z"/>    </g>    <g>        <path class="st1" d="M456.8,25.1V33h-23.5v15.7h19.8v7.9h-19.8v21.6h-9.9v-53H456.8z"/>    </g>    <g>        <path class="st1" d="M514.3,51.6c0,3.9-0.6,7.5-1.9,10.8c-1.3,3.3-3.1,6.2-5.5,8.6c-2.3,2.4-5.2,4.3-8.5,5.7c-3.3,1.4-7,2-11,2            c-4,0-7.7-0.7-11-2c-3.3-1.4-6.1-3.2-8.5-5.7c-2.4-2.4-4.2-5.3-5.5-8.6s-1.9-6.9-1.9-10.8s0.6-7.5,1.9-10.8            c1.3-3.3,3.1-6.2,5.5-8.6c2.4-2.4,5.2-4.3,8.5-5.7c3.3-1.4,7-2,11-2c4,0,7.7,0.7,11,2.1c3.3,1.4,6.1,3.3,8.5,5.7            c2.3,2.4,4.2,5.3,5.5,8.6C513.6,44.1,514.3,47.7,514.3,51.6z M504.2,51.6c0-2.9-0.4-5.5-1.2-7.8c-0.8-2.3-1.9-4.3-3.3-5.9            c-1.4-1.6-3.2-2.8-5.3-3.7c-2.1-0.9-4.4-1.3-7-1.3c-2.6,0-4.9,0.4-7,1.3c-2.1,0.9-3.8,2.1-5.3,3.7c-1.5,1.6-2.6,3.6-3.4,5.9            c-0.8,2.3-1.2,4.9-1.2,7.8s0.4,5.5,1.2,7.8c0.8,2.3,1.9,4.3,3.4,5.9c1.5,1.6,3.2,2.8,5.3,3.7c2.1,0.9,4.4,1.3,7,1.3            c2.6,0,4.9-0.4,7-1.3c2.1-0.9,3.8-2.1,5.3-3.7c1.4-1.6,2.5-3.6,3.3-5.9C503.8,57.1,504.2,54.5,504.2,51.6z"/>    </g>    <g>        <path class="st1" d="M534.9,50.4l2.3,0c1.9,0,3.5-0.2,4.9-0.7c1.4-0.5,2.5-1.1,3.4-1.9c0.9-0.8,1.6-1.8,2-2.9            c0.4-1.1,0.7-2.4,0.7-3.7c0-2.7-0.9-4.8-2.7-6.2c-1.8-1.4-4.5-2.2-8.1-2.2H531v17.6v7.1v20.7h-9.9v-53h16.2c3.6,0,6.7,0.4,9.3,1.1            c2.6,0.7,4.7,1.8,6.3,3.1c1.6,1.3,2.9,3,3.6,4.8c0.8,1.9,1.2,3.9,1.2,6.2c0,1.8-0.3,3.5-0.8,5.1c-0.5,1.6-1.3,3-2.3,4.3            c-1,1.3-2.2,2.4-3.7,3.4c-1.5,1-3.1,1.8-5,2.3c1.2,0.7,2.3,1.7,3.2,3l13.3,19.6h-8.9c-0.9,0-1.6-0.2-2.2-0.5            c-0.6-0.3-1.1-0.8-1.5-1.5c0,0-11.1-17-11.1-17c-0.3-0.4-0.9-1.3-1.5-1.4c-1.2,0-2.4,0-3.5,0c0,0,0-6,0-6.4            C533.8,50.4,534.9,50.4,534.9,50.4z"/>    </g>    <g>        <path class="st1" d="M591.4,70.9c2.2,0,4.2-0.2,5.8-0.6c1.6-0.4,3.2-1,4.7-1.7v-12h-6.6c-0.6,0-1.1-0.2-1.5-0.5            c-0.4-0.4-0.6-0.8-0.6-1.3v-5.6h17.6V73c-1.3,1-2.7,1.8-4.2,2.5c-1.5,0.7-3,1.3-4.7,1.8c-1.7,0.5-3.4,0.8-5.3,1            c-1.9,0.2-3.9,0.3-6.1,0.3c-3.9,0-7.4-0.7-10.7-2c-3.3-1.3-6.1-3.2-8.4-5.6c-2.4-2.4-4.2-5.3-5.6-8.6c-1.3-3.3-2-7-2-10.9            c0-4,0.6-7.6,1.9-11c1.3-3.3,3.1-6.2,5.5-8.6c2.4-2.4,5.3-4.3,8.7-5.6c3.4-1.3,7.2-2,11.4-2c4.3,0,8.1,0.6,11.2,1.9            c3.2,1.3,5.8,3,8,5l-2.9,4.5c-0.6,0.9-1.3,1.4-2.2,1.4c-0.6,0-1.2-0.2-1.8-0.6c-0.8-0.5-1.6-0.9-2.4-1.4c-0.8-0.5-1.7-0.9-2.7-1.2            c-1-0.3-2.1-0.6-3.3-0.8c-1.2-0.2-2.7-0.3-4.3-0.3c-2.6,0-5,0.4-7.1,1.3c-2.1,0.9-3.9,2.1-5.4,3.8c-1.5,1.6-2.6,3.6-3.4,5.9            c-0.8,2.3-1.2,4.9-1.2,7.7c0,3.1,0.4,5.8,1.3,8.2c0.9,2.4,2.1,4.4,3.6,6s3.4,2.9,5.5,3.8S588.9,70.9,591.4,70.9z"/>    </g>    <g>        <path class="st1" d="M645.7,56.8h-16.1v13.4H653v7.9h-33.4v-53H653V33h-23.5v16.3H648v5.8C648,55.1,647.9,56.8,645.7,56.8z"/>    </g></g></svg>
-            </a>
-            <div class="links">
-                
-
-    
-        <div class="nav-dropdown">
-            <a href="/directory" title="Browse">Open Source Software</a>
-
-            <ul class="nav-dropdown-menu">
-                <li><a href="/directory/business-enterprise/financial/accounting/">Accounting</a></li>
-                <li><a href="/directory/business-enterprise/enterprise/crm/">CRM</a></li>
-                <li><a href="/directory/business-enterprise/enterprise/enterprisebi/">Business Intelligence</a></li>
-                <li><a href="/directory/graphics/graphics/3dmodeling/">CAD</a></li>
-                <li><a href="/directory/business-enterprise/enterprise/plm/">PLM</a></li>
-                <li><a href="/directory/business-enterprise/enterprise/processmanagement/">BPM</a></li>
-                <li><a href="/directory/business-enterprise/project-management/">Project Management</a></li>
-                <li><a href="/directory/business-enterprise/knowledgemanagement/">Knowledge Management</a></li>
-                <li><a href="/directory/development/">Development</a></li>
-                <li><a href="/directory/business-enterprise/enterprise/sales/">Sales</a></li>
-                <li><a href="/directory/business-enterprise/ecommerce/">E-Commerce</a></li>
-                <li><a href="/directory/business-enterprise/enterprise/erp/">ERP</a></li>
-                <li><a href="/directory/business-enterprise/enterprise/humanresources/">HR</a></li>
-                <li><a href="/directory/system-administration/">IT Management</a></li>
-                <li><a href="/directory/security-utilities/">IT Security</a></li>
-                <li><a href="/directory/business-enterprise/suites/">Office</a></li>
-                <li><a href="/directory/science-engineering/">Science & Engineering</a></li>
-                <li><a href="/directory">All Software</a></li>
-            </ul>
-        </div>
-
-        <div class="nav-dropdown">
-            <a href="/software">Business Software</a>
-            <ul class="nav-dropdown-menu  dropdown-with-pane">
-                
-                <li class="pane-parent">
-                    <a href="/software/crm/">CRM</a>
-                    <div class="sub-pane">
-                        <div class="heading">CRM</div>
-
-                        
-                            <a href="/software/crm/">CRM</a>
-                        
-                            <a href="/software/customer-service/">Customer Service</a>
-                        
-                            <a href="/software/customer-experience/">Customer Experience</a>
-                        
-                            <a href="/software/point-of-sale/">Point of Sale</a>
-                        
-                            <a href="/software/lead-management/">Lead Management</a>
-                        
-                            <a href="/software/event-management/">Event Management</a>
-                        
-
-                    </div>
-                </li>
-                
-                <li class="pane-parent">
-                    <a href="/software/accounting/">Accounting &amp; Finance</a>
-                    <div class="sub-pane">
-                        <div class="heading">Accounting &amp; Finance</div>
-
-                        
-                            <a href="/software/accounting/">Accounting</a>
-                        
-                            <a href="/software/billing-and-invoicing/">Billing and Invoicing</a>
-                        
-                            <a href="/software/budgeting/">Budgeting</a>
-                        
-                            <a href="/software/compliance/">Compliance</a>
-                        
-                            <a href="/software/payment-processing/">Payment Processing</a>
-                        
-                            <a href="/software/risk-management/">Risk Management</a>
-                        
-
-                    </div>
-                </li>
-                
-                <li class="pane-parent">
-                    <a href="/software/big-data/">Analytics</a>
-                    <div class="sub-pane">
-                        <div class="heading">Analytics</div>
-
-                        
-                            <a href="/software/big-data/">Big Data</a>
-                        
-                            <a href="/software/business-intelligence/">Business Intelligence</a>
-                        
-                            <a href="/software/predictive-analytics/">Predictive Analytics</a>
-                        
-                            <a href="/software/reporting/">Reporting</a>
-                        
-
-                    </div>
-                </li>
-                
-                <li class="pane-parent">
-                    <a href="/software/collaboration/">Collaboration</a>
-                    <div class="sub-pane">
-                        <div class="heading">Collaboration</div>
-
-                        
-                            <a href="/software/collaboration/">Team Collaboration</a>
-                        
-                            <a href="/software/idea-management/">Idea Management</a>
-                        
-                            <a href="/software/conference/">Conferencing</a>
-                        
-                            <a href="/software/engineering-cad/">CAD</a>
-                        
-
-                    </div>
-                </li>
-                
-                <li class="pane-parent">
-                    <a href="/software/communications/">Communications</a>
-                    <div class="sub-pane">
-                        <div class="heading">Communications</div>
-
-                        
-                            <a href="/software/call-center/">Call Center</a>
-                        
-                            <a href="/software/call-recording/">Call Recording</a>
-                        
-                            <a href="/software/call-tracking/">Call Tracking</a>
-                        
-                            <a href="/software/ivr/">IVR</a>
-                        
-                            <a href="/software/predictive-dialer/">Predictive Dialer</a>
-                        
-                            <a href="/software/telephony/">Telephony</a>
-                        
-                            <a href="/software/voip/">VoIP</a>
-                        
-                            <a href="/software/web-conferencing/">Web Conferencing</a>
-                        
-
-                    </div>
-                </li>
-                
-                <li class="pane-parent">
-                    <a href="/software/marketing/">Marketing</a>
-                    <div class="sub-pane">
-                        <div class="heading">Marketing</div>
-
-                        
-                            <a href="/software/campaign-management/">Campaign Management</a>
-                        
-                            <a href="/software/digital-asset-management/">Digital Asset Management</a>
-                        
-                            <a href="/software/email-marketing/">Email Marketing</a>
-                        
-                            <a href="/software/lead-generation/">Lead Generation</a>
-                        
-                            <a href="/software/marketing-automation/">Marketing Automation</a>
-                        
-                            <a href="/software/seo/">SEO</a>
-                        
-                            <a href="/software/digital-signage/">Digital Signage</a>
-                        
-
-                    </div>
-                </li>
-                
-                <li class="pane-parent">
-                    <a href="/software/erp/">ERP</a>
-                    <div class="sub-pane">
-                        <div class="heading">ERP</div>
-
-                        
-                            <a href="/software/erp/">ERP</a>
-                        
-                            <a href="/software/product-lifecycle-management/">PLM</a>
-                        
-                            <a href="/software/business-process-management/">Business Process Management</a>
-                        
-                            <a href="/software/ehs-management/">EHS Management</a>
-                        
-                            <a href="/software/supply-chain-management/">Supply Chain Management</a>
-                        
-
-                    </div>
-                </li>
-                
-                <li class="pane-parent">
-                    <a href="/software/human-resources/">HR</a>
-                    <div class="sub-pane">
-                        <div class="heading">HR</div>
-
-                        
-                            <a href="/software/360-degree-feedback/">360 Degree Feedback</a>
-                        
-                            <a href="/software/human-resources/">Human Resource Management</a>
-                        
-                            <a href="/software/benefits-administration/">Benefits Administration</a>
-                        
-                            <a href="/software/compensation-management/">Compensation Management</a>
-                        
-                            <a href="/software/employee-engagement/">Employee Engagement</a>
-                        
-                            <a href="/software/applicant-tracking/">Applicant Tracking</a>
-                        
-                            <a href="/software/time-clock/">Time Clock</a>
-                        
-                            <a href="/software/workforce-management/">Workforce Management</a>
-                        
-                            <a href="/software/recruiting/">Recruiting</a>
-                        
-
-                    </div>
-                </li>
-                
-                <li class="pane-parent">
-                    <a href="/software/it-management/">IT Management</a>
-                    <div class="sub-pane">
-                        <div class="heading">IT Management</div>
-
-                        
-                            <a href="/software/it-management/">IT Management</a>
-                        
-                            <a href="/software/application-performance-management/">Application Performance Management</a>
-                        
-                            <a href="/software/application-lifecycle-management/">Application Lifecycle Management</a>
-                        
-                            <a href="/software/it-asset-management/">IT Asset Management</a>
-                        
-                            <a href="/software/database-management/">Database Management</a>
-                        
-                            <a href="/software/cloud-management/">Cloud Management</a>
-                        
-                            <a href="/software/network-monitoring/">Network Monitoring</a>
-                        
-                            <a href="/software/help-desk/">Help Desk</a>
-                        
-                            <a href="/software/issue-tracking/">Issue Tracking</a>
-                        
-                            <a href="/software/devops/">DevOps</a>
-                        
-
-                    </div>
-                </li>
-                
-                <li class="pane-parent">
-                    <a href="/software/it-security/">Security</a>
-                    <div class="sub-pane">
-                        <div class="heading">Security</div>
-
-                        
-                            <a href="/software/it-security/">IT Security</a>
-                        
-                            <a href="/software/endpoint-protection/">Endpoint Protection</a>
-                        
-                            <a href="/software/identity-management/">Identity Management</a>
-                        
-                            <a href="/software/network-security/">Network Security</a>
-                        
-                            <a href="/software/email-security/">Email Security</a>
-                        
-
-                    </div>
-                </li>
-                
-                <li class="pane-parent">
-                    <a href="/software/project-management/">Project Management</a>
-                    <div class="sub-pane">
-                        <div class="heading">Project Management</div>
-
-                        
-                            <a href="/software/project-management/">Project Management</a>
-                        
-                            <a href="/software/content-management/">Content Management System (CMS)</a>
-                        
-                            <a href="/software/task-management/">Task Management</a>
-                        
-                            <a href="/software/project-portfolio-management/">Project Portfolio Management</a>
-                        
-                            <a href="/software/time-tracking/">Time Tracking</a>
-                        
-                            <a href="/software/pdf/">PDF</a>
-                        
-
-                    </div>
-                </li>
-                
-                 <li>
-                    <a href="/software/">All Software</a>
-                 </li>
-            </ul>
-        </div>
-
-        <div class="nav-dropdown">
-            <a href="#">Services</a>
-            <ul class="nav-dropdown-menu">
-                
-                <li><a href="/business-voip/">Business VoIP</a></li>
-                
-
-                
-                <li><a href="/cloud-storage-providers/">Cloud Storage</a></li>
-                
-
-                
-                <li><a href="/speedtest/">Internet Speed Test</a></li>
-                
-
-            </ul>
-        </div>
-
-        <div class="nav-dropdown">
-            <a href="#">Resources</a>
-            <ul class="nav-dropdown-menu">
-                  <li><a href="/blog">Blog</a></li>
-                  <li><a href="/articles">Articles</a></li>
-                  <li><a href="https://deals.sourceforge.net/?utm_source=sourceforge&utm_medium=navbar&utm_campaign=homepage">Deals</a></li>
-            </ul>
-        </div>
-    
-
-                <div class="dev-menu-when-stuck">
-                    Menu
-                    <ul class="dev-menu-dropdown header-nav-menulist">
-                        <li><a href="/support">Help</a></li>
-                        <li><a href="/create">Create</a></li>
-                        <li><a href="/user/registration/" title="Join" >Join</a></li>
-                        <li><a href="/auth/" title="Login">Login</a></li>
-                    </ul>
-                </div>
-                <div class="search-toggle-when-stuck">
-                    <a class="search-toggle">
-                        
-
-<svg  viewBox="0 0 1792 1792" xmlns="http://www.w3.org/2000/svg"><path d="M1216 832q0-185-131.5-316.5t-316.5-131.5-316.5 131.5-131.5 316.5 131.5 316.5 316.5 131.5 316.5-131.5 131.5-316.5zm512 832q0 52-38 90t-90 38q-54 0-90-38l-343-342q-179 124-399 124-143 0-273.5-55.5t-225-150-150-225-55.5-273.5 55.5-273.5 150-225 225-150 273.5-55.5 273.5 55.5 225 150 150 225 55.5 273.5q0 220-124 399l343 343q37 37 37 90z"/></svg>
-                    </a>
-                </div>
-            </div>
-
-            <div class="search">
-                <div class="social-icons">
-                    
-<span></span>
-<a href="https://twitter.com/sourceforge" class="twitter" rel="nofollow" target="_blank">
-
-<svg  viewBox="0 0 1792 1792" xmlns="http://www.w3.org/2000/svg"><path d="M1684 408q-67 98-162 167 1 14 1 42 0 130-38 259.5t-115.5 248.5-184.5 210.5-258 146-323 54.5q-271 0-496-145 35 4 78 4 225 0 401-138-105-2-188-64.5t-114-159.5q33 5 61 5 43 0 85-11-112-23-185.5-111.5t-73.5-205.5v-4q68 38 146 41-66-44-105-115t-39-154q0-88 44-163 121 149 294.5 238.5t371.5 99.5q-8-38-8-74 0-134 94.5-228.5t228.5-94.5q140 0 236 102 109-21 205-78-37 115-142 178 93-10 186-50z"/></svg></a>
-<a href="https://www.facebook.com/sourceforgenet/" class="facebook" rel="nofollow" target="_blank">
-
-<svg  viewBox="0 0 1792 1792" xmlns="http://www.w3.org/2000/svg"><path d="M1343 12v264h-157q-86 0-116 36t-30 108v189h293l-39 296h-254v759h-306v-759h-255v-296h255v-218q0-186 104-288.5t277-102.5q147 0 228 12z"/></svg></a>
-<a href="https://www.linkedin.com/company/sourceforge.net" class="linkedin" rel="nofollow" target="_blank">
-
-<svg  viewBox="0 0 1792 1792" xmlns="http://www.w3.org/2000/svg"><path d="M477 625v991h-330v-991h330zm21-306q1 73-50.5 122t-135.5 49h-2q-82 0-132-49t-50-122q0-74 51.5-122.5t134.5-48.5 133 48.5 51 122.5zm1166 729v568h-329v-530q0-105-40.5-164.5t-126.5-59.5q-63 0-105.5 34.5t-63.5 85.5q-11 30-11 81v553h-329q2-399 2-647t-1-296l-1-48h329v144h-2q20-32 41-56t56.5-52 87-43.5 114.5-15.5q171 0 275 113.5t104 332.5z"/></svg></a>
-<a href="/user/newsletters" rel=nofollow class="newsletter" title="Subscribe to our newsletter">
-
-<svg  version="1.1"  xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" viewBox="0 0 42 42" enable-background="new 0 0 42 42" xml:space="preserve"><path fill="#FFFFFF" d="M0,6v30h42V6H0z M24.2,21.2c-0.8,0.8-2.3,2-3.2,2c-0.9,0-2.4-1.2-3.2-2L5.8,9.7h30.3L24.2,21.2z M13.7,21l-9.9,9.4V11.6L13.7,21z M15.7,23L15.7,23c0.5,0.5,2.9,2.9,5.3,2.9c2.4,0,4.8-2.4,5.2-2.8l0.1-0.1l9.8,9.4H5.8L15.7,23z M28.3,21l9.9-9.5v18.9L28.3,21z"/></svg></a>
-<span></span>
-                </div>
-                <form method="get" action="/directory/">
-    
-    <div class="typeahead__container">
-      <div class="typeahead__field">
-        <div class="typeahead__query">
-        
-        <input type="text" placeholder="Search for software or solutions" autocomplete="off" name="q" >
-        
-        </div>
-        
-        <label>
-        <input type="submit" class="bt" value="">
-            
-
-<svg  viewBox="0 0 1792 1792" xmlns="http://www.w3.org/2000/svg"><path d="M1216 832q0-185-131.5-316.5t-316.5-131.5-316.5 131.5-131.5 316.5 131.5 316.5 316.5 131.5 316.5-131.5 131.5-316.5zm512 832q0 52-38 90t-90 38q-54 0-90-38l-343-342q-179 124-399 124-143 0-273.5-55.5t-225-150-150-225-55.5-273.5 55.5-273.5 150-225 225-150 273.5-55.5 273.5 55.5 225 150 150 225 55.5 273.5q0 220-124 399l343 343q37 37 37 90z"/></svg>
-        </label>
-    
-      </div>
-    </div>
-    
-    </form>
-            </div>
-        </nav>
-    </section>
-    
-</div>
-    
-    
-    <div class="notification-on-project-page">
-    
-        
-    
-    
-    
-    </div>
-    
-    
-
-
-    <section id="page-body" class=" neighborhood-Projects project-pamie mountpoint-code 
-
-">
-        <div id="nav_menu_holder">
-            
-                
-                    
-    
-        
-        <div class="sandiego"> 
-          
-<section class="project-masthead"> 
-    
-<div class="backdrop" style="box-sizing: content-box; padding-bottom: 24px"></div>
-
-    <div class="content">
-    
-        
-    <nav id="breadcrumbs" class="breadcrumbs">
-        <ul>
-            <li itemscope itemtype="http://data-vocabulary.org/Breadcrumb"><a itemprop="url" href="/">Home</a></li>
-            <li itemscope itemtype="http://data-vocabulary.org/Breadcrumb"><a itemprop="url" href="/directory">Browse</a></li>
-            
-            
-                
-                
-            
-            
-                
-            
-            
-            
-                <li itemscope itemtype="http://data-vocabulary.org/Breadcrumb"><a itemprop="url" href="/p/pamie/">PAMIE</a></li>
-                
-            
-            
-                <li itemscope itemtype="http://data-vocabulary.org/Breadcrumb">Code</li>
-                
-            
-        </ul>
-    </nav>
-    
-    
-
-<div class="overview">
-
-    
-
-<div class="project-icon  default-project-icon " >
-    
-    
-    
-
-<svg  version="1.1"  xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" viewBox="0 0 300 300" style="enable-background:new 0 0 300 300;" xml:space="preserve"><rect class="st0" width="300" height="300"/><g><path class="st1" d="M162.5,154.8c0-28.9-10.2-42-15.6-46.9c-1.1-1-2.7-0.1-2.6,1.3c1.1,16.3-19.4,20.3-19.4,45.9h0c0,0.1,0,0.1,0,0.2c0,15.6,11.8,28.3,26.3,28.3c14.5,0,26.3-12.7,26.3-28.3c0-0.1,0-0.1,0-0.2h0c0-7.2-2.7-14.1-5.5-19.3c-0.5-1-2.1-0.6-1.9,0.3C174.9,158.1,162.5,171.8,162.5,154.8z"/><g><path class="st1" d="M131.2,215.6c-0.7,0-1.3-0.3-1.8-0.7l-67.2-67.1c-1-1-1-2.6,0-3.6l70.9-70.9c0.5-0.5,1.1-0.7,1.8-0.7h20.4c1.2,0,2,0.8,2.3,1.6c0.3,0.7,0.3,1.9-0.5,2.7l-66.7,66.7c-1.3,1.3-1.3,3.5,0,4.9l52.7,52.7c1,1,1,2.6,0,3.6L133,214.9C132.5,215.4,131.9,215.6,131.2,215.6z"/></g><g><path class="st1" d="M144.7,227.4c-1.2,0-2-0.8-2.3-1.5c-0.3-0.7-0.3-1.9,0.5-2.7l66.7-66.7c0.7-0.6,1-1.5,1-2.4s-0.4-1.8-1-2.4l-52.7-52.7c-1-1-1-2.6,0-3.6l10.2-10.2c0.5-0.5,1.1-0.7,1.8-0.7c0.7,0,1.3,0.3,1.8,0.7l67,67.1c0.5,0.5,0.7,1.1,0.7,1.8s-0.3,1.3-0.7,1.8l-70.9,70.9c-0.5,0.5-1.1,0.7-1.8,0.7H144.7z"/></g></g></svg>
-    </div>
-
-
-    <div class="title">
-        
-        
-        
-        
-        
-        <h1 itemprop="name"><a href="/p/pamie/" itemprop="url">PAMIE</a></h1>
-        
-        <h3 class="summary">
-            A Python class to allow the user to automate Internet Explorer
-        </h3>
-        
-            
-            
-          
-
-
-        
-        
-        <h3 class="brought-by">
-
-            
-
-            Brought to you by:
-            
-                
-                    <a href="/u/rmarchetti/">rmarchetti</a>
-                
-            
-        </h3>
-        
-
-        
-    </div>
-
-    
-</div>
-
-    
-    
-    
-  
-    </div>
-</section>
-
-        </div>
-    
-
-                
-            
-        </div>
-        <div id="top_nav" class="">
-            
-                
-<div id="top_nav_admin">
-<ul class="dropdown">
-  
-    <li class="">
-        <a href="/projects/pamie/" class="tool-summary-32" >
-            Summary
-        </a>
-        
-        
-    </li>
-  
-    <li class="">
-        <a href="/projects/pamie/files/" class="tool-files-32" >
-            Files
-        </a>
-        
-        
-    </li>
-  
-    <li class="">
-        <a href="/projects/pamie/reviews" class="tool-reviews-32" >
-            Reviews
-        </a>
-        
-        
-    </li>
-  
-    <li class="">
-        <a href="/projects/pamie/support" class="tool-support-32" >
-            Support
-        </a>
-        
-        
-    </li>
-  
-    <li class="">
-        <a href="/p/pamie/wiki/" class="tool-wiki-32" >
-            Wiki
-        </a>
-        
-        
-    </li>
-  
-    <li class="">
-        <a href="/p/pamie/_list/tickets" class="tool-tickets-32" >
-            Tickets ▾
-        </a>
-        
-        
-            <ul>
-                
-                    <li class=""><a href="/p/pamie/bugs/" >Bugs</a></li>
-                
-                    <li class=""><a href="/p/pamie/patches/" >Patches</a></li>
-                
-            </ul>
-        
-    </li>
-  
-    <li class="">
-        <a href="/p/pamie/news/" class="tool-blog-32" >
-            News
-        </a>
-        
-        
-    </li>
-  
-    <li class="">
-        <a href="/p/pamie/discussion/" class="tool-discussion-32" >
-            Discussion
-        </a>
-        
-        
-    </li>
-  
-    <li class="">
-        <a href="https://www.paypal.com/cgi-bin/webscr?item_name=Donation+to+PAMIE&amp;cmd=_donations&amp;business=bobm_qa%40hotmail.com" class="tool-link-32"  rel="nofollow">
-            Donate
-        </a>
-        
-        
-    </li>
-  
-    <li class="selected">
-        <a href="/p/pamie/code/" class="tool-svn-32" >
-            Code
-        </a>
-        
-        
-    </li>
-  
-    <li class="">
-        <a href="/p/pamie/cvs/" class="tool-cvs-32" >
-            Cvs
-        </a>
-        
-        
-    </li>
-  
-  
-</ul>
-</div>
-
-
-            
-        </div>
-        <div id="content_base">
-            
-
-    
-                
-                    
-<a id="sidebar-activate" href="#">
-    <span class="btn-label">Menu</span>
-    <span class="btn-arrow-down">▾</span>
-    <span class="btn-arrow-up">▴</span>
-</a>
-
-                        
-
-
-<div id="sidebar">
-  
-    <div class="placeholder-no-searchbox">&nbsp;</div>
-  
-    
-    
-      
-      
-        
-    
-      <ul class="sidebarmenu">
-      
-    
-  <li>
-      
-        <a class="icon" href="/p/pamie/code/commit_browser" title="Browse Commits"><i class="fa fa-list"></i>
-      
-      <span>Browse Commits</span>
-      </a>
-  </li>
-  
-      
-    
-    
-      </ul>
-      
-    
-    
-</div>
-                    
-
-                    
-                
-                
-                    
-                
-                <div class="grid-20 pad">
-                    <h2 class="dark title">
-<a href="/p/pamie/code/20/">[r20]</a>:
-
-  
-      <a href="./../"><b class="fa fa-folder-open-o" title="Root directory"></b></a> /
-  
-  
-    <a href="./">trunk</a> /
-  
- pamie3.py
-
-                        <!-- actions -->
-                        <small>
-                            
-
-    
-    <a class="icon" href="#" id="maximize-content" title="Maximize"><i class="fa fa-expand"></i>&nbsp;Maximize</a>
-    <a class="icon" href="#" id="restore-content" title="Restore"><i class="fa fa-compress"></i>&nbsp;Restore</a>
-<a class="icon" href="/p/pamie/code/20/log/?path=/trunk/pamie.py" title="History"><i class="fa fa-calendar"></i>&nbsp;History</a>
-
-                        </small>
-                        <!-- /actions -->
-                    </h2>
-                    
-                    <div>
-                        
-  
-
-                        
-  
-    <p><a rel="nofollow" href="?format=raw">Download this file</a></p>
-    <div class="clip grid-19 codebrowser">
-      <h3>
-        2346 lines (2070 with data), 86.4 kB
-      </h3>
-      
-        <table class="codehilitetable"><tr><td class="linenos"><div class="linenodiv"><pre>   1
-   2
-   3
-   4
-   5
-   6
-   7
-   8
-   9
-  10
-  11
-  12
-  13
-  14
-  15
-  16
-  17
-  18
-  19
-  20
-  21
-  22
-  23
-  24
-  25
-  26
-  27
-  28
-  29
-  30
-  31
-  32
-  33
-  34
-  35
-  36
-  37
-  38
-  39
-  40
-  41
-  42
-  43
-  44
-  45
-  46
-  47
-  48
-  49
-  50
-  51
-  52
-  53
-  54
-  55
-  56
-  57
-  58
-  59
-  60
-  61
-  62
-  63
-  64
-  65
-  66
-  67
-  68
-  69
-  70
-  71
-  72
-  73
-  74
-  75
-  76
-  77
-  78
-  79
-  80
-  81
-  82
-  83
-  84
-  85
-  86
-  87
-  88
-  89
-  90
-  91
-  92
-  93
-  94
-  95
-  96
-  97
-  98
-  99
- 100
- 101
- 102
- 103
- 104
- 105
- 106
- 107
- 108
- 109
- 110
- 111
- 112
- 113
- 114
- 115
- 116
- 117
- 118
- 119
- 120
- 121
- 122
- 123
- 124
- 125
- 126
- 127
- 128
- 129
- 130
- 131
- 132
- 133
- 134
- 135
- 136
- 137
- 138
- 139
- 140
- 141
- 142
- 143
- 144
- 145
- 146
- 147
- 148
- 149
- 150
- 151
- 152
- 153
- 154
- 155
- 156
- 157
- 158
- 159
- 160
- 161
- 162
- 163
- 164
- 165
- 166
- 167
- 168
- 169
- 170
- 171
- 172
- 173
- 174
- 175
- 176
- 177
- 178
- 179
- 180
- 181
- 182
- 183
- 184
- 185
- 186
- 187
- 188
- 189
- 190
- 191
- 192
- 193
- 194
- 195
- 196
- 197
- 198
- 199
- 200
- 201
- 202
- 203
- 204
- 205
- 206
- 207
- 208
- 209
- 210
- 211
- 212
- 213
- 214
- 215
- 216
- 217
- 218
- 219
- 220
- 221
- 222
- 223
- 224
- 225
- 226
- 227
- 228
- 229
- 230
- 231
- 232
- 233
- 234
- 235
- 236
- 237
- 238
- 239
- 240
- 241
- 242
- 243
- 244
- 245
- 246
- 247
- 248
- 249
- 250
- 251
- 252
- 253
- 254
- 255
- 256
- 257
- 258
- 259
- 260
- 261
- 262
- 263
- 264
- 265
- 266
- 267
- 268
- 269
- 270
- 271
- 272
- 273
- 274
- 275
- 276
- 277
- 278
- 279
- 280
- 281
- 282
- 283
- 284
- 285
- 286
- 287
- 288
- 289
- 290
- 291
- 292
- 293
- 294
- 295
- 296
- 297
- 298
- 299
- 300
- 301
- 302
- 303
- 304
- 305
- 306
- 307
- 308
- 309
- 310
- 311
- 312
- 313
- 314
- 315
- 316
- 317
- 318
- 319
- 320
- 321
- 322
- 323
- 324
- 325
- 326
- 327
- 328
- 329
- 330
- 331
- 332
- 333
- 334
- 335
- 336
- 337
- 338
- 339
- 340
- 341
- 342
- 343
- 344
- 345
- 346
- 347
- 348
- 349
- 350
- 351
- 352
- 353
- 354
- 355
- 356
- 357
- 358
- 359
- 360
- 361
- 362
- 363
- 364
- 365
- 366
- 367
- 368
- 369
- 370
- 371
- 372
- 373
- 374
- 375
- 376
- 377
- 378
- 379
- 380
- 381
- 382
- 383
- 384
- 385
- 386
- 387
- 388
- 389
- 390
- 391
- 392
- 393
- 394
- 395
- 396
- 397
- 398
- 399
- 400
- 401
- 402
- 403
- 404
- 405
- 406
- 407
- 408
- 409
- 410
- 411
- 412
- 413
- 414
- 415
- 416
- 417
- 418
- 419
- 420
- 421
- 422
- 423
- 424
- 425
- 426
- 427
- 428
- 429
- 430
- 431
- 432
- 433
- 434
- 435
- 436
- 437
- 438
- 439
- 440
- 441
- 442
- 443
- 444
- 445
- 446
- 447
- 448
- 449
- 450
- 451
- 452
- 453
- 454
- 455
- 456
- 457
- 458
- 459
- 460
- 461
- 462
- 463
- 464
- 465
- 466
- 467
- 468
- 469
- 470
- 471
- 472
- 473
- 474
- 475
- 476
- 477
- 478
- 479
- 480
- 481
- 482
- 483
- 484
- 485
- 486
- 487
- 488
- 489
- 490
- 491
- 492
- 493
- 494
- 495
- 496
- 497
- 498
- 499
- 500
- 501
- 502
- 503
- 504
- 505
- 506
- 507
- 508
- 509
- 510
- 511
- 512
- 513
- 514
- 515
- 516
- 517
- 518
- 519
- 520
- 521
- 522
- 523
- 524
- 525
- 526
- 527
- 528
- 529
- 530
- 531
- 532
- 533
- 534
- 535
- 536
- 537
- 538
- 539
- 540
- 541
- 542
- 543
- 544
- 545
- 546
- 547
- 548
- 549
- 550
- 551
- 552
- 553
- 554
- 555
- 556
- 557
- 558
- 559
- 560
- 561
- 562
- 563
- 564
- 565
- 566
- 567
- 568
- 569
- 570
- 571
- 572
- 573
- 574
- 575
- 576
- 577
- 578
- 579
- 580
- 581
- 582
- 583
- 584
- 585
- 586
- 587
- 588
- 589
- 590
- 591
- 592
- 593
- 594
- 595
- 596
- 597
- 598
- 599
- 600
- 601
- 602
- 603
- 604
- 605
- 606
- 607
- 608
- 609
- 610
- 611
- 612
- 613
- 614
- 615
- 616
- 617
- 618
- 619
- 620
- 621
- 622
- 623
- 624
- 625
- 626
- 627
- 628
- 629
- 630
- 631
- 632
- 633
- 634
- 635
- 636
- 637
- 638
- 639
- 640
- 641
- 642
- 643
- 644
- 645
- 646
- 647
- 648
- 649
- 650
- 651
- 652
- 653
- 654
- 655
- 656
- 657
- 658
- 659
- 660
- 661
- 662
- 663
- 664
- 665
- 666
- 667
- 668
- 669
- 670
- 671
- 672
- 673
- 674
- 675
- 676
- 677
- 678
- 679
- 680
- 681
- 682
- 683
- 684
- 685
- 686
- 687
- 688
- 689
- 690
- 691
- 692
- 693
- 694
- 695
- 696
- 697
- 698
- 699
- 700
- 701
- 702
- 703
- 704
- 705
- 706
- 707
- 708
- 709
- 710
- 711
- 712
- 713
- 714
- 715
- 716
- 717
- 718
- 719
- 720
- 721
- 722
- 723
- 724
- 725
- 726
- 727
- 728
- 729
- 730
- 731
- 732
- 733
- 734
- 735
- 736
- 737
- 738
- 739
- 740
- 741
- 742
- 743
- 744
- 745
- 746
- 747
- 748
- 749
- 750
- 751
- 752
- 753
- 754
- 755
- 756
- 757
- 758
- 759
- 760
- 761
- 762
- 763
- 764
- 765
- 766
- 767
- 768
- 769
- 770
- 771
- 772
- 773
- 774
- 775
- 776
- 777
- 778
- 779
- 780
- 781
- 782
- 783
- 784
- 785
- 786
- 787
- 788
- 789
- 790
- 791
- 792
- 793
- 794
- 795
- 796
- 797
- 798
- 799
- 800
- 801
- 802
- 803
- 804
- 805
- 806
- 807
- 808
- 809
- 810
- 811
- 812
- 813
- 814
- 815
- 816
- 817
- 818
- 819
- 820
- 821
- 822
- 823
- 824
- 825
- 826
- 827
- 828
- 829
- 830
- 831
- 832
- 833
- 834
- 835
- 836
- 837
- 838
- 839
- 840
- 841
- 842
- 843
- 844
- 845
- 846
- 847
- 848
- 849
- 850
- 851
- 852
- 853
- 854
- 855
- 856
- 857
- 858
- 859
- 860
- 861
- 862
- 863
- 864
- 865
- 866
- 867
- 868
- 869
- 870
- 871
- 872
- 873
- 874
- 875
- 876
- 877
- 878
- 879
- 880
- 881
- 882
- 883
- 884
- 885
- 886
- 887
- 888
- 889
- 890
- 891
- 892
- 893
- 894
- 895
- 896
- 897
- 898
- 899
- 900
- 901
- 902
- 903
- 904
- 905
- 906
- 907
- 908
- 909
- 910
- 911
- 912
- 913
- 914
- 915
- 916
- 917
- 918
- 919
- 920
- 921
- 922
- 923
- 924
- 925
- 926
- 927
- 928
- 929
- 930
- 931
- 932
- 933
- 934
- 935
- 936
- 937
- 938
- 939
- 940
- 941
- 942
- 943
- 944
- 945
- 946
- 947
- 948
- 949
- 950
- 951
- 952
- 953
- 954
- 955
- 956
- 957
- 958
- 959
- 960
- 961
- 962
- 963
- 964
- 965
- 966
- 967
- 968
- 969
- 970
- 971
- 972
- 973
- 974
- 975
- 976
- 977
- 978
- 979
- 980
- 981
- 982
- 983
- 984
- 985
- 986
- 987
- 988
- 989
- 990
- 991
- 992
- 993
- 994
- 995
- 996
- 997
- 998
- 999
-1000
-1001
-1002
-1003
-1004
-1005
-1006
-1007
-1008
-1009
-1010
-1011
-1012
-1013
-1014
-1015
-1016
-1017
-1018
-1019
-1020
-1021
-1022
-1023
-1024
-1025
-1026
-1027
-1028
-1029
-1030
-1031
-1032
-1033
-1034
-1035
-1036
-1037
-1038
-1039
-1040
-1041
-1042
-1043
-1044
-1045
-1046
-1047
-1048
-1049
-1050
-1051
-1052
-1053
-1054
-1055
-1056
-1057
-1058
-1059
-1060
-1061
-1062
-1063
-1064
-1065
-1066
-1067
-1068
-1069
-1070
-1071
-1072
-1073
-1074
-1075
-1076
-1077
-1078
-1079
-1080
-1081
-1082
-1083
-1084
-1085
-1086
-1087
-1088
-1089
-1090
-1091
-1092
-1093
-1094
-1095
-1096
-1097
-1098
-1099
-1100
-1101
-1102
-1103
-1104
-1105
-1106
-1107
-1108
-1109
-1110
-1111
-1112
-1113
-1114
-1115
-1116
-1117
-1118
-1119
-1120
-1121
-1122
-1123
-1124
-1125
-1126
-1127
-1128
-1129
-1130
-1131
-1132
-1133
-1134
-1135
-1136
-1137
-1138
-1139
-1140
-1141
-1142
-1143
-1144
-1145
-1146
-1147
-1148
-1149
-1150
-1151
-1152
-1153
-1154
-1155
-1156
-1157
-1158
-1159
-1160
-1161
-1162
-1163
-1164
-1165
-1166
-1167
-1168
-1169
-1170
-1171
-1172
-1173
-1174
-1175
-1176
-1177
-1178
-1179
-1180
-1181
-1182
-1183
-1184
-1185
-1186
-1187
-1188
-1189
-1190
-1191
-1192
-1193
-1194
-1195
-1196
-1197
-1198
-1199
-1200
-1201
-1202
-1203
-1204
-1205
-1206
-1207
-1208
-1209
-1210
-1211
-1212
-1213
-1214
-1215
-1216
-1217
-1218
-1219
-1220
-1221
-1222
-1223
-1224
-1225
-1226
-1227
-1228
-1229
-1230
-1231
-1232
-1233
-1234
-1235
-1236
-1237
-1238
-1239
-1240
-1241
-1242
-1243
-1244
-1245
-1246
-1247
-1248
-1249
-1250
-1251
-1252
-1253
-1254
-1255
-1256
-1257
-1258
-1259
-1260
-1261
-1262
-1263
-1264
-1265
-1266
-1267
-1268
-1269
-1270
-1271
-1272
-1273
-1274
-1275
-1276
-1277
-1278
-1279
-1280
-1281
-1282
-1283
-1284
-1285
-1286
-1287
-1288
-1289
-1290
-1291
-1292
-1293
-1294
-1295
-1296
-1297
-1298
-1299
-1300
-1301
-1302
-1303
-1304
-1305
-1306
-1307
-1308
-1309
-1310
-1311
-1312
-1313
-1314
-1315
-1316
-1317
-1318
-1319
-1320
-1321
-1322
-1323
-1324
-1325
-1326
-1327
-1328
-1329
-1330
-1331
-1332
-1333
-1334
-1335
-1336
-1337
-1338
-1339
-1340
-1341
-1342
-1343
-1344
-1345
-1346
-1347
-1348
-1349
-1350
-1351
-1352
-1353
-1354
-1355
-1356
-1357
-1358
-1359
-1360
-1361
-1362
-1363
-1364
-1365
-1366
-1367
-1368
-1369
-1370
-1371
-1372
-1373
-1374
-1375
-1376
-1377
-1378
-1379
-1380
-1381
-1382
-1383
-1384
-1385
-1386
-1387
-1388
-1389
-1390
-1391
-1392
-1393
-1394
-1395
-1396
-1397
-1398
-1399
-1400
-1401
-1402
-1403
-1404
-1405
-1406
-1407
-1408
-1409
-1410
-1411
-1412
-1413
-1414
-1415
-1416
-1417
-1418
-1419
-1420
-1421
-1422
-1423
-1424
-1425
-1426
-1427
-1428
-1429
-1430
-1431
-1432
-1433
-1434
-1435
-1436
-1437
-1438
-1439
-1440
-1441
-1442
-1443
-1444
-1445
-1446
-1447
-1448
-1449
-1450
-1451
-1452
-1453
-1454
-1455
-1456
-1457
-1458
-1459
-1460
-1461
-1462
-1463
-1464
-1465
-1466
-1467
-1468
-1469
-1470
-1471
-1472
-1473
-1474
-1475
-1476
-1477
-1478
-1479
-1480
-1481
-1482
-1483
-1484
-1485
-1486
-1487
-1488
-1489
-1490
-1491
-1492
-1493
-1494
-1495
-1496
-1497
-1498
-1499
-1500
-1501
-1502
-1503
-1504
-1505
-1506
-1507
-1508
-1509
-1510
-1511
-1512
-1513
-1514
-1515
-1516
-1517
-1518
-1519
-1520
-1521
-1522
-1523
-1524
-1525
-1526
-1527
-1528
-1529
-1530
-1531
-1532
-1533
-1534
-1535
-1536
-1537
-1538
-1539
-1540
-1541
-1542
-1543
-1544
-1545
-1546
-1547
-1548
-1549
-1550
-1551
-1552
-1553
-1554
-1555
-1556
-1557
-1558
-1559
-1560
-1561
-1562
-1563
-1564
-1565
-1566
-1567
-1568
-1569
-1570
-1571
-1572
-1573
-1574
-1575
-1576
-1577
-1578
-1579
-1580
-1581
-1582
-1583
-1584
-1585
-1586
-1587
-1588
-1589
-1590
-1591
-1592
-1593
-1594
-1595
-1596
-1597
-1598
-1599
-1600
-1601
-1602
-1603
-1604
-1605
-1606
-1607
-1608
-1609
-1610
-1611
-1612
-1613
-1614
-1615
-1616
-1617
-1618
-1619
-1620
-1621
-1622
-1623
-1624
-1625
-1626
-1627
-1628
-1629
-1630
-1631
-1632
-1633
-1634
-1635
-1636
-1637
-1638
-1639
-1640
-1641
-1642
-1643
-1644
-1645
-1646
-1647
-1648
-1649
-1650
-1651
-1652
-1653
-1654
-1655
-1656
-1657
-1658
-1659
-1660
-1661
-1662
-1663
-1664
-1665
-1666
-1667
-1668
-1669
-1670
-1671
-1672
-1673
-1674
-1675
-1676
-1677
-1678
-1679
-1680
-1681
-1682
-1683
-1684
-1685
-1686
-1687
-1688
-1689
-1690
-1691
-1692
-1693
-1694
-1695
-1696
-1697
-1698
-1699
-1700
-1701
-1702
-1703
-1704
-1705
-1706
-1707
-1708
-1709
-1710
-1711
-1712
-1713
-1714
-1715
-1716
-1717
-1718
-1719
-1720
-1721
-1722
-1723
-1724
-1725
-1726
-1727
-1728
-1729
-1730
-1731
-1732
-1733
-1734
-1735
-1736
-1737
-1738
-1739
-1740
-1741
-1742
-1743
-1744
-1745
-1746
-1747
-1748
-1749
-1750
-1751
-1752
-1753
-1754
-1755
-1756
-1757
-1758
-1759
-1760
-1761
-1762
-1763
-1764
-1765
-1766
-1767
-1768
-1769
-1770
-1771
-1772
-1773
-1774
-1775
-1776
-1777
-1778
-1779
-1780
-1781
-1782
-1783
-1784
-1785
-1786
-1787
-1788
-1789
-1790
-1791
-1792
-1793
-1794
-1795
-1796
-1797
-1798
-1799
-1800
-1801
-1802
-1803
-1804
-1805
-1806
-1807
-1808
-1809
-1810
-1811
-1812
-1813
-1814
-1815
-1816
-1817
-1818
-1819
-1820
-1821
-1822
-1823
-1824
-1825
-1826
-1827
-1828
-1829
-1830
-1831
-1832
-1833
-1834
-1835
-1836
-1837
-1838
-1839
-1840
-1841
-1842
-1843
-1844
-1845
-1846
-1847
-1848
-1849
-1850
-1851
-1852
-1853
-1854
-1855
-1856
-1857
-1858
-1859
-1860
-1861
-1862
-1863
-1864
-1865
-1866
-1867
-1868
-1869
-1870
-1871
-1872
-1873
-1874
-1875
-1876
-1877
-1878
-1879
-1880
-1881
-1882
-1883
-1884
-1885
-1886
-1887
-1888
-1889
-1890
-1891
-1892
-1893
-1894
-1895
-1896
-1897
-1898
-1899
-1900
-1901
-1902
-1903
-1904
-1905
-1906
-1907
-1908
-1909
-1910
-1911
-1912
-1913
-1914
-1915
-1916
-1917
-1918
-1919
-1920
-1921
-1922
-1923
-1924
-1925
-1926
-1927
-1928
-1929
-1930
-1931
-1932
-1933
-1934
-1935
-1936
-1937
-1938
-1939
-1940
-1941
-1942
-1943
-1944
-1945
-1946
-1947
-1948
-1949
-1950
-1951
-1952
-1953
-1954
-1955
-1956
-1957
-1958
-1959
-1960
-1961
-1962
-1963
-1964
-1965
-1966
-1967
-1968
-1969
-1970
-1971
-1972
-1973
-1974
-1975
-1976
-1977
-1978
-1979
-1980
-1981
-1982
-1983
-1984
-1985
-1986
-1987
-1988
-1989
-1990
-1991
-1992
-1993
-1994
-1995
-1996
-1997
-1998
-1999
-2000
-2001
-2002
-2003
-2004
-2005
-2006
-2007
-2008
-2009
-2010
-2011
-2012
-2013
-2014
-2015
-2016
-2017
-2018
-2019
-2020
-2021
-2022
-2023
-2024
-2025
-2026
-2027
-2028
-2029
-2030
-2031
-2032
-2033
-2034
-2035
-2036
-2037
-2038
-2039
-2040
-2041
-2042
-2043
-2044
-2045
-2046
-2047
-2048
-2049
-2050
-2051
-2052
-2053
-2054
-2055
-2056
-2057
-2058
-2059
-2060
-2061
-2062
-2063
-2064
-2065
-2066
-2067
-2068
-2069
-2070
-2071
-2072
-2073
-2074
-2075
-2076
-2077
-2078
-2079
-2080
-2081
-2082
-2083
-2084
-2085
-2086
-2087
-2088
-2089
-2090
-2091
-2092
-2093
-2094
-2095
-2096
-2097
-2098
-2099
-2100
-2101
-2102
-2103
-2104
-2105
-2106
-2107
-2108
-2109
-2110
-2111
-2112
-2113
-2114
-2115
-2116
-2117
-2118
-2119
-2120
-2121
-2122
-2123
-2124
-2125
-2126
-2127
-2128
-2129
-2130
-2131
-2132
-2133
-2134
-2135
-2136
-2137
-2138
-2139
-2140
-2141
-2142
-2143
-2144
-2145
-2146
-2147
-2148
-2149
-2150
-2151
-2152
-2153
-2154
-2155
-2156
-2157
-2158
-2159
-2160
-2161
-2162
-2163
-2164
-2165
-2166
-2167
-2168
-2169
-2170
-2171
-2172
-2173
-2174
-2175
-2176
-2177
-2178
-2179
-2180
-2181
-2182
-2183
-2184
-2185
-2186
-2187
-2188
-2189
-2190
-2191
-2192
-2193
-2194
-2195
-2196
-2197
-2198
-2199
-2200
-2201
-2202
-2203
-2204
-2205
-2206
-2207
-2208
-2209
-2210
-2211
-2212
-2213
-2214
-2215
-2216
-2217
-2218
-2219
-2220
-2221
-2222
-2223
-2224
-2225
-2226
-2227
-2228
-2229
-2230
-2231
-2232
-2233
-2234
-2235
-2236
-2237
-2238
-2239
-2240
-2241
-2242
-2243
-2244
-2245
-2246
-2247
-2248
-2249
-2250
-2251
-2252
-2253
-2254
-2255
-2256
-2257
-2258
-2259
-2260
-2261
-2262
-2263
-2264
-2265
-2266
-2267
-2268
-2269
-2270
-2271
-2272
-2273
-2274
-2275
-2276
-2277
-2278
-2279
-2280
-2281
-2282
-2283
-2284
-2285
-2286
-2287
-2288
-2289
-2290
-2291
-2292
-2293
-2294
-2295
-2296
-2297
-2298
-2299
-2300
-2301
-2302
-2303
-2304
-2305
-2306
-2307
-2308
-2309
-2310
-2311
-2312
-2313
-2314
-2315
-2316
-2317
-2318
-2319
-2320
-2321
-2322
-2323
-2324
-2325
-2326
-2327
-2328
-2329
-2330
-2331
-2332
-2333
-2334
-2335
-2336
-2337
-2338
-2339
-2340
-2341
-2342
-2343
-2344
-2345</pre></div></td><td class="code"><div class="codehilite"><pre><div id="l1" class="code_block"><span class="sd">&quot;&quot;&quot; </span>
-</div><div id="l2" class="code_block"><span class="sd">cPAMIE Build 3.0a</span>
-</div><div id="l3" class="code_block"><span class="sd">Based on PAM.py by RLM</span>
-</div><div id="l4" class="code_block"><span class="sd">Revised: March 4, 2008</span>
-</div><div id="l5" class="code_block"><span class="sd">Developers: Robert L. Marchetti, George Flaherty, Drunk Bum</span>
-</div><div id="l6" class="code_block"><span class="sd">Description: This python class file allow you to write scripts to Automate the Internet Explorer Browser Client.</span>
-</div><div id="l7" class="code_block">
-</div><div id="l8" class="code_block">
-</div><div id="l9" class="code_block"><span class="sd">This software is provided &#39;as-is&#39;, without any express or implied warranty.</span>
-</div><div id="l10" class="code_block"><span class="sd">In no event will the authors be held liable for any damages arising from the use of this software.</span>
-</div><div id="l11" class="code_block">
-</div><div id="l12" class="code_block"><span class="sd">Permission is granted to anyone to use this software for any purpose,</span>
-</div><div id="l13" class="code_block"><span class="sd">including commercial applications, and to alter it and redistribute it freely, subject to the following restrictions:</span>
-</div><div id="l14" class="code_block">
-</div><div id="l15" class="code_block"><span class="sd">1. The origin of this software must not be misrepresented; you must not claim that you wrote the original software.</span>
-</div><div id="l16" class="code_block"><span class="sd">   If you use this software in a product, an acknowledgment in the product documentation would be appreciated but is not required.</span>
-</div><div id="l17" class="code_block"><span class="sd">2. Altered source versions must be plainly marked as such, and must not be misrepresented as being the original software.</span>
-</div><div id="l18" class="code_block"><span class="sd">3. This notice may not be removed or altered from any source distribution.</span>
-</div><div id="l19" class="code_block">
-</div><div id="l20" class="code_block"><span class="sd">Special Thanks to: All the Pamie Users and Developers for their time and effort, Steve M., Drunk Bum, Jeff H.,</span>
-</div><div id="l21" class="code_block"><span class="sd">Dave K., Henry W., Tom C., Scott W.,Margie M. and all others for there support and contributions.</span>
-</div><div id="l22" class="code_block"><span class="sd">See !whatsnew.txt for modification history.</span>
-</div><div id="l23" class="code_block"><span class="sd">&quot;&quot;&quot;</span>
-</div><div id="l24" class="code_block"><span class="kn">import</span> <span class="nn">sys</span>
-</div><div id="l25" class="code_block"><span class="kn">import</span> <span class="nn">win32com.client</span> 
-</div><div id="l26" class="code_block"><span class="kn">import</span> <span class="nn">win32gui</span>
-</div><div id="l27" class="code_block"><span class="kn">import</span> <span class="nn">time</span>
-</div><div id="l28" class="code_block"><span class="kn">import</span> <span class="nn">pdb</span>
-</div><div id="l29" class="code_block"><span class="kn">import</span> <span class="nn">re</span>
-</div><div id="l30" class="code_block"><span class="kn">import</span> <span class="nn">random</span>
-</div><div id="l31" class="code_block"><span class="kn">import</span> <span class="nn">string</span>
-</div><div id="l32" class="code_block"><span class="kn">import</span> <span class="nn">datetime</span>
-</div><div id="l33" class="code_block"><span class="kn">import</span> <span class="nn">os</span>
-</div><div id="l34" class="code_block"><span class="kn">import</span> <span class="nn">traceback</span>
-</div><div id="l35" class="code_block">
-</div><div id="l36" class="code_block"><span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;c:\python24\lib&#39;</span><span class="p">)</span>
-</div><div id="l37" class="code_block">
-</div><div id="l38" class="code_block"><span class="k">class</span> <span class="nc">PAMIE</span><span class="p">:</span>
-</div><div id="l39" class="code_block">    <span class="sd">&quot;&quot;&quot;</span>
-</div><div id="l40" class="code_block"><span class="sd">    cPAMIE is an automation object based on the work of PAMIE by RLM</span>
-</div><div id="l41" class="code_block"><span class="sd">    http://pamie.sourceforge.net/</span>
-</div><div id="l42" class="code_block"><span class="sd">    &quot;&quot;&quot;</span>
-</div><div id="l43" class="code_block">    <span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;3.0&quot;</span>
-</div><div id="l44" class="code_block">
-</div><div id="l45" class="code_block">    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">url</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">timeOut</span><span class="o">=</span><span class="mi">3000</span><span class="p">):</span>
-</div><div id="l46" class="code_block">        <span class="sd">&quot;&quot;&quot; The class instantiation code. When the object is instantiated you can</span>
-</div><div id="l47" class="code_block"><span class="sd">        pass a starting URL. If no URL is passed then about:blank, a blank</span>
-</div><div id="l48" class="code_block"><span class="sd">        page, is brought up.</span>
-</div><div id="l49" class="code_block"><span class="sd">        parameters:</span>
-</div><div id="l50" class="code_block"><span class="sd">            [url]     - url to navigate to initially</span>
-</div><div id="l51" class="code_block"><span class="sd">            [timeOut] - how many 100mS increments to wait, 10 = 1sec, 100=10sec</span>
-</div><div id="l52" class="code_block"><span class="sd">        returns:</span>
-</div><div id="l53" class="code_block"><span class="sd">            Nothing</span>
-</div><div id="l54" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l55" class="code_block">        
-</div><div id="l56" class="code_block">        <span class="c1">#pythoncom.CoInitialize()</span>
-</div><div id="l57" class="code_block">        
-</div><div id="l58" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span> <span class="o">=</span> <span class="bp">True</span>           <span class="c1"># Show debug print lines?</span>
-</div><div id="l59" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span> <span class="o">=</span> <span class="s2">&quot;#F6F7AD&quot;</span>     <span class="c1"># Set to None to turn off highlighting</span>
-</div><div id="l60" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">frame_name</span> <span class="o">=</span> <span class="bp">None</span>               <span class="c1"># The current frame name or index. Nested frames are</span>
-</div><div id="l61" class="code_block">                                            <span class="c1"># supported in the format frame1.frame2.frame3</span>
-</div><div id="l62" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">form_name</span> <span class="o">=</span> <span class="bp">None</span>                <span class="c1"># The current form name or index</span>
-</div><div id="l63" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">busyTuner</span> <span class="o">=</span> <span class="mi">1</span>                  <span class="c1"># Number of consecutive checks to verify document is no longer busy.</span>
-</div><div id="l64" class="code_block">        
-</div><div id="l65" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span> <span class="o">=</span> <span class="n">win32com</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">dynamic</span><span class="o">.</span><span class="n">Dispatch</span><span class="p">(</span><span class="s1">&#39;InternetExplorer.Application&#39;</span><span class="p">)</span>
-</div><div id="l66" class="code_block">        <span class="k">if</span> <span class="n">url</span><span class="p">:</span>
-</div><div id="l67" class="code_block">            <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Navigate</span><span class="p">(</span><span class="n">url</span><span class="p">)</span>
-</div><div id="l68" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l69" class="code_block">            <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Navigate</span><span class="p">(</span><span class="s1">&#39;about:blank&#39;</span><span class="p">)</span>
-</div><div id="l70" class="code_block">          
-</div><div id="l71" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_timeOut</span> <span class="o">=</span> <span class="n">timeOut</span>
-</div><div id="l72" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Visible</span> <span class="o">=</span> <span class="mi">1</span>
-</div><div id="l73" class="code_block">        <span class="c1">#self._ie.resizable = 1</span>
-</div><div id="l74" class="code_block">        <span class="c1">#self._ie.fullscreen = 1</span>
-</div><div id="l75" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">MenuBar</span><span class="o">=</span><span class="mi">1</span> 
-</div><div id="l76" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">ToolBar</span><span class="o">=</span><span class="mi">1</span> 
-</div><div id="l77" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">AddressBar</span><span class="o">=</span><span class="mi">1</span>
-</div><div id="l78" class="code_block">        
-</div><div id="l79" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">timer</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
-</div><div id="l80" class="code_block">
-</div><div id="l81" class="code_block">
-</div><div id="l82" class="code_block">    <span class="k">def</span> <span class="nf">_docGetReadyState</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">doc</span><span class="p">):</span>
-</div><div id="l83" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the readyState of a document.  This is a seperate function so</span>
-</div><div id="l84" class="code_block"><span class="sd">            the &quot;Access Denied&quot; error that IE throws up every once in a while can</span>
-</div><div id="l85" class="code_block"><span class="sd">            be caught and ignored, without breaking the timing in the wait() functions.</span>
-</div><div id="l86" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l87" class="code_block"><span class="sd">                doc     - The document</span>
-</div><div id="l88" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l89" class="code_block"><span class="sd">                The readyState.</span>
-</div><div id="l90" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l91" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l92" class="code_block">            <span class="k">return</span> <span class="n">doc</span><span class="o">.</span><span class="n">readyState</span>
-</div><div id="l93" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l94" class="code_block">            <span class="k">return</span> <span class="s2">&quot;&quot;</span>
-</div><div id="l95" class="code_block">        
-</div><div id="l96" class="code_block">    <span class="k">def</span> <span class="nf">_frame_wait</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">frame</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l97" class="code_block">        <span class="sd">&quot;&quot;&quot; Waits for a page to be fully loaded. A completely soundproof method has yet to be found to accomplish</span>
-</div><div id="l98" class="code_block"><span class="sd">            this, but the function works in the majority of instances. The function waits for both the doc busy attribute</span>
-</div><div id="l99" class="code_block"><span class="sd">            to be False and the doc readyState to be &#39;complete&#39;.  It will continue to wait until the maximim timeOut</span>
-</div><div id="l100" class="code_block"><span class="sd">            value has been reached. In addition, the busyTuner can be adjusted to force the function to verify the</span>
-</div><div id="l101" class="code_block"><span class="sd">            specified number of consecutive &#39;not busy and completed&#39; checks before continuing.</span>
-</div><div id="l102" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l103" class="code_block"><span class="sd">                [frame]     - A frame element.</span>
-</div><div id="l104" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l105" class="code_block"><span class="sd">                True if the wait was successful, else False</span>
-</div><div id="l106" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l107" class="code_block">        <span class="n">ready_count</span> <span class="o">=</span> <span class="mi">0</span>
-</div><div id="l108" class="code_block">        <span class="n">time_left</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_timeOut</span>
-</div><div id="l109" class="code_block">
-</div><div id="l110" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l111" class="code_block">            <span class="k">if</span> <span class="n">frame</span><span class="p">:</span>
-</div><div id="l112" class="code_block">                <span class="n">myFrame</span> <span class="o">=</span> <span class="n">frame</span>
-</div><div id="l113" class="code_block">            <span class="k">else</span><span class="p">:</span>
-</div><div id="l114" class="code_block">                <span class="n">myFrame</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">getFrame</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">frame_name</span><span class="p">)</span>
-</div><div id="l115" class="code_block">
-</div><div id="l116" class="code_block">            <span class="k">while</span> <span class="n">ready_count</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">busyTuner</span> <span class="ow">and</span> <span class="n">time_left</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
-</div><div id="l117" class="code_block">                <span class="k">try</span><span class="p">:</span>
-</div><div id="l118" class="code_block">                    <span class="n">doc</span> <span class="o">=</span> <span class="n">myFrame</span><span class="o">.</span><span class="n">document</span>
-</div><div id="l119" class="code_block">                <span class="k">except</span><span class="p">:</span>
-</div><div id="l120" class="code_block">                    <span class="k">continue</span>     <span class="c1"># if the document never gets itself together this will timeout</span>
-</div><div id="l121" class="code_block">
-</div><div id="l122" class="code_block">                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Busy</span> <span class="o">==</span> <span class="bp">False</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_docGetReadyState</span><span class="p">(</span><span class="n">doc</span><span class="p">)</span> <span class="o">==</span> <span class="s1">&#39;complete&#39;</span><span class="p">:</span>
-</div><div id="l123" class="code_block">                    <span class="n">ready_count</span> <span class="o">+=</span> <span class="mi">1</span>
-</div><div id="l124" class="code_block">                <span class="k">else</span><span class="p">:</span>
-</div><div id="l125" class="code_block">                    <span class="n">ready_count</span> <span class="o">=</span> <span class="mi">0</span>
-</div><div id="l126" class="code_block">
-</div><div id="l127" class="code_block">                <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.05</span><span class="p">)</span>
-</div><div id="l128" class="code_block">                <span class="n">time_left</span> <span class="o">-=</span> <span class="mi">1</span>
-</div><div id="l129" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l130" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span> <span class="n">ErrorValue</span><span class="p">,</span> <span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l131" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l132" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l133" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l134" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l135" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l136" class="code_block">        
-</div><div id="l137" class="code_block">    <span class="k">def</span> <span class="nf">_wait</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</div><div id="l138" class="code_block">        <span class="sd">&quot;&quot;&quot; Waits for a page to be fully loaded. A completely soundproof method has yet to be found to accomplish</span>
-</div><div id="l139" class="code_block"><span class="sd">            this, but the function works in the majority of instances. The function waits for both the doc busy attribute</span>
-</div><div id="l140" class="code_block"><span class="sd">            to be False and the doc readyState to be &#39;complete&#39;.  It will continue to wait until the maximim timeOut</span>
-</div><div id="l141" class="code_block"><span class="sd">            value has been reached. In addition, the busyTuner can be adjusted to force the function to verify the</span>
-</div><div id="l142" class="code_block"><span class="sd">            specified number of consecutive &#39;not busy and completed&#39; checks before continuing.</span>
-</div><div id="l143" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l144" class="code_block"><span class="sd">                None</span>
-</div><div id="l145" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l146" class="code_block"><span class="sd">                True if the wait was successful, else False</span>
-</div><div id="l147" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l148" class="code_block">        <span class="n">ready_count</span> <span class="o">=</span> <span class="mi">0</span>
-</div><div id="l149" class="code_block">        <span class="n">time_left</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_timeOut</span>
-</div><div id="l150" class="code_block">
-</div><div id="l151" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l152" class="code_block">            <span class="k">while</span> <span class="n">ready_count</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">busyTuner</span> <span class="ow">and</span> <span class="n">time_left</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
-</div><div id="l153" class="code_block">                <span class="k">try</span><span class="p">:</span>
-</div><div id="l154" class="code_block">                    <span class="n">doc</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span>
-</div><div id="l155" class="code_block">                <span class="k">except</span><span class="p">:</span>
-</div><div id="l156" class="code_block">                    <span class="k">continue</span>     <span class="c1"># if the document never gets itself together this will timeout</span>
-</div><div id="l157" class="code_block">
-</div><div id="l158" class="code_block">                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Busy</span> <span class="o">==</span> <span class="bp">False</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_docGetReadyState</span><span class="p">(</span><span class="n">doc</span><span class="p">)</span> <span class="o">==</span> <span class="s1">&#39;complete&#39;</span><span class="p">:</span>
-</div><div id="l159" class="code_block">                    <span class="n">ready_count</span> <span class="o">+=</span> <span class="mi">1</span>
-</div><div id="l160" class="code_block">                <span class="k">else</span><span class="p">:</span>
-</div><div id="l161" class="code_block">                    <span class="n">ready_count</span> <span class="o">=</span> <span class="mi">0</span>
-</div><div id="l162" class="code_block">
-</div><div id="l163" class="code_block">                <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.05</span><span class="p">)</span>
-</div><div id="l164" class="code_block">                <span class="n">time_left</span> <span class="o">-=</span> <span class="mi">1</span>
-</div><div id="l165" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l166" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l167" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l168" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l169" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l170" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l171" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l172" class="code_block">        
-</div><div id="l173" class="code_block">
-</div><div id="l174" class="code_block">    <span class="k">def</span> <span class="nf">button_exists</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l175" class="code_block">        <span class="sd">&quot;&quot;&quot; Checks to see if a button exists</span>
-</div><div id="l176" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l177" class="code_block"><span class="sd">                name   - The id, name, value or index of the button.</span>
-</div><div id="l178" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l179" class="code_block"><span class="sd">                True if the button is found, else False</span>
-</div><div id="l180" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l181" class="code_block">        <span class="n">my_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_button</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l182" class="code_block">        <span class="k">if</span> <span class="n">my_element</span><span class="p">:</span>
-</div><div id="l183" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l184" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l185" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l186" class="code_block">
-</div><div id="l187" class="code_block">    <span class="k">def</span> <span class="nf">change_window</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">win_text</span><span class="p">):</span>
-</div><div id="l188" class="code_block">        <span class="sd">&quot;&quot;&quot;  changeWindow()</span>
-</div><div id="l189" class="code_block"><span class="sd">        changes control to new or existing window</span>
-</div><div id="l190" class="code_block"><span class="sd">        Parms:</span>
-</div><div id="l191" class="code_block"><span class="sd">            win_text - title of window to control</span>
-</div><div id="l192" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l193" class="code_block">        <span class="c1"># Grab the POP-UP Window</span>
-</div><div id="l194" class="code_block">        <span class="n">new_win</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">window_find</span><span class="p">(</span><span class="n">win_text</span><span class="p">)</span>
-</div><div id="l195" class="code_block">
-</div><div id="l196" class="code_block">        <span class="c1"># Use Pamie for COM object for POP-UP Window</span>
-</div><div id="l197" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span> <span class="o">=</span> <span class="n">new_win</span>
-</div><div id="l198" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span>
-</div><div id="l199" class="code_block">      
-</div><div id="l200" class="code_block">
-</div><div id="l201" class="code_block">    <span class="k">def</span> <span class="nf">checkBox_exists</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l202" class="code_block">        <span class="sd">&quot;&quot;&quot; Checks to see if a checkbox exists</span>
-</div><div id="l203" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l204" class="code_block"><span class="sd">                name   - The id, name, or value of the button.</span>
-</div><div id="l205" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l206" class="code_block"><span class="sd">                True if the checkbox is found, else False</span>
-</div><div id="l207" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l208" class="code_block">        <span class="n">my_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_checkbox</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l209" class="code_block">        <span class="k">if</span> <span class="n">my_element</span><span class="p">:</span>
-</div><div id="l210" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l211" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l212" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l213" class="code_block">
-</div><div id="l214" class="code_block">    <span class="k">def</span> <span class="nf">click_button</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l215" class="code_block">        <span class="sd">&quot;&quot;&quot; Clicks a button</span>
-</div><div id="l216" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l217" class="code_block"><span class="sd">                name        - The id, name, value or index of the button, or a button element.</span>
-</div><div id="l218" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l219" class="code_block"><span class="sd">                True on success, else False</span>
-</div><div id="l220" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l221" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l222" class="code_block">            <span class="n">my_button</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_button</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l223" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l224" class="code_block">            <span class="n">my_button</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l225" class="code_block">
-</div><div id="l226" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">click_element</span><span class="p">(</span><span class="n">my_button</span><span class="p">)</span>
-</div><div id="l227" class="code_block">
-</div><div id="l228" class="code_block">    <span class="k">def</span> <span class="nf">click_button_image</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l229" class="code_block">        <span class="sd">&quot;&quot;&quot; Click a button of input type &quot;image&quot;</span>
-</div><div id="l230" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l231" class="code_block"><span class="sd">                name   - The id, name, value or index of the button, or a button element.</span>
-</div><div id="l232" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l233" class="code_block"><span class="sd">                True on success, else False</span>
-</div><div id="l234" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l235" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l236" class="code_block">            <span class="n">my_elements</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;type=image&quot;</span><span class="p">)</span>
-</div><div id="l237" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">found_element</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;id;name;value&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">my_elements</span><span class="p">)</span>
-</div><div id="l238" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l239" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l240" class="code_block">
-</div><div id="l241" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">click_element</span><span class="p">(</span><span class="n">found_element</span><span class="p">)</span>
-</div><div id="l242" class="code_block">
-</div><div id="l243" class="code_block">    <span class="k">def</span> <span class="nf">click_element</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">element</span><span class="p">):</span>
-</div><div id="l244" class="code_block">        <span class="sd">&quot;&quot;&quot; Clicks the passed element</span>
-</div><div id="l245" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l246" class="code_block"><span class="sd">                element       - the element to click</span>
-</div><div id="l247" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l248" class="code_block"><span class="sd">                True on success, else False</span>
-</div><div id="l249" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l250" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l251" class="code_block">            <span class="k">if</span> <span class="ow">not</span> <span class="n">element</span><span class="p">:</span>
-</div><div id="l252" class="code_block">                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** clickElement() was not passed a valid element&quot;</span><span class="p">)</span>
-</div><div id="l253" class="code_block">                <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l254" class="code_block">            
-</div><div id="l255" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l256" class="code_block">            <span class="n">element</span><span class="o">.</span><span class="n">focus</span><span class="p">()</span>
-</div><div id="l257" class="code_block">            <span class="n">element</span><span class="o">.</span><span class="n">blur</span><span class="p">()</span>
-</div><div id="l258" class="code_block">            <span class="n">element</span><span class="o">.</span><span class="n">click</span><span class="p">()</span>
-</div><div id="l259" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l260" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l261" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l262" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l263" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l264" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l265" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l266" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l267" class="code_block">
-</div><div id="l268" class="code_block">    <span class="k">def</span> <span class="nf">click_hidden_element</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">element</span><span class="p">):</span>
-</div><div id="l269" class="code_block">     
-</div><div id="l270" class="code_block">        <span class="sd">&quot;&quot;&quot; Clicks the passed element</span>
-</div><div id="l271" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l272" class="code_block"><span class="sd">                element       - the element to click</span>
-</div><div id="l273" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l274" class="code_block"><span class="sd">                True on success, else False</span>
-</div><div id="l275" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l276" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l277" class="code_block">            <span class="k">if</span> <span class="ow">not</span> <span class="n">element</span><span class="p">:</span>
-</div><div id="l278" class="code_block">                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** clickElement() was not passed a valid element&quot;</span><span class="p">)</span>
-</div><div id="l279" class="code_block">                <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l280" class="code_block">            
-</div><div id="l281" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l282" class="code_block">            <span class="n">element</span><span class="o">.</span><span class="n">click</span><span class="p">()</span>
-</div><div id="l283" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l284" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l285" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l286" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l287" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l288" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l289" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l290" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l291" class="code_block">
-</div><div id="l292" class="code_block">    <span class="k">def</span> <span class="nf">click_hidden_link</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l293" class="code_block">        <span class="sd">&quot;&quot;&quot; Clicks a hidden link.</span>
-</div><div id="l294" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l295" class="code_block"><span class="sd">                name   - The id or innerText of the link</span>
-</div><div id="l296" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l297" class="code_block"><span class="sd">                True on success, else False</span>
-</div><div id="l298" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l299" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l300" class="code_block">            <span class="n">my_link</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">getLink</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l301" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l302" class="code_block">            <span class="n">my_link</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l303" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">click_hidden_element</span><span class="p">(</span><span class="n">my_link</span><span class="p">)</span>
-</div><div id="l304" class="code_block">
-</div><div id="l305" class="code_block">    <span class="k">def</span> <span class="nf">click_image</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l306" class="code_block">        <span class="sd">&quot;&quot;&quot; Clicks an image</span>
-</div><div id="l307" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l308" class="code_block"><span class="sd">                name    The id, name, src or index of the image</span>
-</div><div id="l309" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l310" class="code_block"><span class="sd">                True on success, else False</span>
-</div><div id="l311" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l312" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l313" class="code_block">            <span class="n">my_image</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_image</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l314" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l315" class="code_block">            <span class="n">my_image</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l316" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">click_element</span><span class="p">(</span><span class="n">my_image</span><span class="p">)</span>
-</div><div id="l317" class="code_block">      
-</div><div id="l318" class="code_block">
-</div><div id="l319" class="code_block">    <span class="k">def</span> <span class="nf">click_Link</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l320" class="code_block">        <span class="sd">&quot;&quot;&quot; Clicks a link.</span>
-</div><div id="l321" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l322" class="code_block"><span class="sd">                name   - The id or innerText of the link</span>
-</div><div id="l323" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l324" class="code_block"><span class="sd">                True on success, else False</span>
-</div><div id="l325" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l326" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l327" class="code_block">            <span class="n">my_link</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_link</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l328" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l329" class="code_block">            <span class="n">my_link</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l330" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">click_element</span><span class="p">(</span><span class="n">my_link</span><span class="p">)</span>
-</div><div id="l331" class="code_block">
-</div><div id="l332" class="code_block">    <span class="k">def</span> <span class="nf">click_menu</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">class_name</span><span class="p">,</span> <span class="n">control_name</span><span class="p">,</span> <span class="n">event</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l333" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a div</span>
-</div><div id="l334" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l335" class="code_block"><span class="sd">                name   - The id, name, or index of the div</span>
-</div><div id="l336" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l337" class="code_block"><span class="sd">                The div if found, else None</span>
-</div><div id="l338" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l339" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span>
-</div><div id="l340" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l341" class="code_block">            <span class="n">doc</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">getElementsByTagName</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
-</div><div id="l342" class="code_block">            <span class="k">for</span> <span class="n">element</span> <span class="ow">in</span> <span class="n">doc</span><span class="p">:</span>
-</div><div id="l343" class="code_block">                <span class="k">if</span> <span class="n">element</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span><span class="k">break</span>
-</div><div id="l344" class="code_block">                <span class="k">if</span> <span class="n">element</span><span class="o">.</span><span class="n">className</span> <span class="o">==</span> <span class="n">class_name</span> <span class="p">:</span>
-</div><div id="l345" class="code_block">                    
-</div><div id="l346" class="code_block">                    <span class="k">if</span> <span class="n">element</span><span class="o">.</span><span class="n">id</span> <span class="o">==</span> <span class="s2">&quot;name&quot;</span><span class="p">:</span>
-</div><div id="l347" class="code_block">                        <span class="n">element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="s2">&quot;cyan&quot;</span>
-</div><div id="l348" class="code_block">                        <span class="n">element</span><span class="o">.</span><span class="n">FireEvent</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">control_name</span><span class="p">,</span> <span class="n">event</span><span class="p">)</span>
-</div><div id="l349" class="code_block">                <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l350" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l351" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l352" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l353" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l354" class="code_block">            <span class="k">return</span> <span class="bp">None</span>      
-</div><div id="l355" class="code_block">    
-</div><div id="l356" class="code_block">    
-</div><div id="l357" class="code_block">    <span class="k">def</span> <span class="nf">close_window</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l358" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l359" class="code_block">            <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Close</span><span class="p">()</span>
-</div><div id="l360" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l361" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l362" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l363" class="code_block">         
-</div><div id="l364" class="code_block">    <span class="k">def</span> <span class="nf">div_exists</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l365" class="code_block">        <span class="sd">&quot;&quot;&quot; Checks to see if a div exists</span>
-</div><div id="l366" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l367" class="code_block"><span class="sd">                name   - The id, name, or index of the button.</span>
-</div><div id="l368" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l369" class="code_block"><span class="sd">                True if the div is found, else False</span>
-</div><div id="l370" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l371" class="code_block">        <span class="n">my_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_div</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l372" class="code_block">        <span class="k">if</span> <span class="n">my_element</span><span class="p">:</span>
-</div><div id="l373" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l374" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l375" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l376" class="code_block">
-</div><div id="l377" class="code_block">    <span class="k">def</span> <span class="nf">element_exists</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">att</span><span class="p">,</span> <span class="n">val</span><span class="p">):</span>
-</div><div id="l378" class="code_block">        <span class="sd">&quot;&quot;&quot; Checks to see if an element exists.</span>
-</div><div id="l379" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l380" class="code_block"><span class="sd">                tag             - The HTML tag name</span>
-</div><div id="l381" class="code_block"><span class="sd">                att             - The tag attribute to search for</span>
-</div><div id="l382" class="code_block"><span class="sd">                val             - The attribute value to match</span>
-</div><div id="l383" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l384" class="code_block"><span class="sd">                True if the element exists, else False</span>
-</div><div id="l385" class="code_block"><span class="sd">        &quot;&quot;&quot;</span> 
-</div><div id="l386" class="code_block">        <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">att</span><span class="p">,</span> <span class="n">val</span><span class="p">)</span>
-</div><div id="l387" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l388" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l389" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l390" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l391" class="code_block">
-</div><div id="l392" class="code_block">    <span class="k">def</span> <span class="nf">execute_javascript</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l393" class="code_block">        <span class="sd">&quot;&quot;&quot; Executes a java script function</span>
-</div><div id="l394" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l395" class="code_block"><span class="sd">                name  - The name of the javascript function</span>
-</div><div id="l396" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l397" class="code_block"><span class="sd">                True on success, else False</span>
-</div><div id="l398" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l399" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span> 
-</div><div id="l400" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l401" class="code_block">            <span class="n">doc</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span>
-</div><div id="l402" class="code_block">            <span class="n">pw</span> <span class="o">=</span> <span class="n">doc</span><span class="o">.</span><span class="n">parentWindow</span>
-</div><div id="l403" class="code_block">            <span class="n">script</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l404" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;script&quot;</span><span class="p">,</span><span class="n">script</span><span class="p">)</span>
-</div><div id="l405" class="code_block">            <span class="n">pw</span><span class="o">.</span><span class="n">execScript</span><span class="p">(</span><span class="n">script</span><span class="p">)</span> 
-</div><div id="l406" class="code_block">        <span class="k">except</span><span class="p">:</span> 
-</div><div id="l407" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l408" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l409" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l410" class="code_block">            <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
-</div><div id="l411" class="code_block">
-</div><div id="l412" class="code_block">    <span class="k">def</span> <span class="nf">find_element</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">attributes</span><span class="p">,</span> <span class="n">val</span><span class="p">,</span> <span class="n">element_list</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l413" class="code_block">        <span class="sd">&quot;&quot;&quot; The main find function that hunts down an element on the page according</span>
-</div><div id="l414" class="code_block"><span class="sd">            to the specified parameters.  Tries to take into account class</span>
-</div><div id="l415" class="code_block"><span class="sd">            specified frames or forms.</span>
-</div><div id="l416" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l417" class="code_block"><span class="sd">                tag             - The HTML tag name.</span>
-</div><div id="l418" class="code_block"><span class="sd">                attributes      - The semi-colon seperated tag attribute to search for.</span>
-</div><div id="l419" class="code_block"><span class="sd">                val             - The attribute value to match.  Regular Expressions</span>
-</div><div id="l420" class="code_block"><span class="sd">                                  can be used by starting the val with an !</span>
-</div><div id="l421" class="code_block"><span class="sd">                [elementList]   - Find the element in the passed list.</span>
-</div><div id="l422" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l423" class="code_block"><span class="sd">                The found element</span>
-</div><div id="l424" class="code_block"><span class="sd">        &quot;&quot;&quot;</span> 
-</div><div id="l425" class="code_block">        <span class="c1">##        try:</span>
-</div><div id="l426" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span>
-</div><div id="l427" class="code_block">        <span class="n">atts</span> <span class="o">=</span> <span class="n">attributes</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;;&quot;</span><span class="p">)</span>
-</div><div id="l428" class="code_block">        <span class="n">regEx</span> <span class="o">=</span> <span class="bp">False</span>
-</div><div id="l429" class="code_block">
-</div><div id="l430" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">val</span><span class="p">,</span> <span class="nb">str</span> <span class="p">):</span>
-</div><div id="l431" class="code_block">            <span class="k">if</span> <span class="n">val</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;!&quot;</span><span class="p">:</span>
-</div><div id="l432" class="code_block">                <span class="n">val</span> <span class="o">=</span> <span class="n">val</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span> <span class="s2">&quot;!&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
-</div><div id="l433" class="code_block">                <span class="n">myRE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="n">val</span><span class="p">)</span>
-</div><div id="l434" class="code_block">                <span class="n">regEx</span> <span class="o">=</span> <span class="bp">True</span>
-</div><div id="l435" class="code_block">        
-</div><div id="l436" class="code_block">        <span class="k">if</span> <span class="n">element_list</span><span class="p">:</span>
-</div><div id="l437" class="code_block">            <span class="k">if</span> <span class="n">tag</span><span class="p">:</span>
-</div><div id="l438" class="code_block">                <span class="n">elements</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="s2">&quot;tagName=&quot;</span> <span class="o">+</span> <span class="n">tag</span><span class="p">,</span> <span class="n">element_list</span><span class="p">)</span>
-</div><div id="l439" class="code_block">                
-</div><div id="l440" class="code_block">            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">val</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>        <span class="c1"># Do we want the index?</span>
-</div><div id="l441" class="code_block">                <span class="k">return</span> <span class="n">elements</span><span class="p">[</span><span class="n">val</span><span class="p">]</span>
-</div><div id="l442" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l443" class="code_block">            <span class="n">elements</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
-</div><div id="l444" class="code_block">            
-</div><div id="l445" class="code_block">        <span class="k">for</span> <span class="n">el</span> <span class="ow">in</span> <span class="n">elements</span><span class="p">[:]:</span>
-</div><div id="l446" class="code_block">            <span class="k">if</span> <span class="n">regEx</span><span class="p">:</span>
-</div><div id="l447" class="code_block">                <span class="k">for</span> <span class="n">att</span> <span class="ow">in</span> <span class="n">atts</span><span class="p">[:]:</span>
-</div><div id="l448" class="code_block">                    <span class="n">val_text</span> <span class="o">=</span> <span class="n">el</span><span class="o">.</span><span class="n">getAttribute</span><span class="p">(</span><span class="n">att</span><span class="p">)</span>
-</div><div id="l449" class="code_block">                    <span class="k">if</span> <span class="n">val_text</span> <span class="o">!=</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l450" class="code_block">                        <span class="n">m</span> <span class="o">=</span> <span class="n">myRE</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">val_text</span><span class="p">)</span>
-</div><div id="l451" class="code_block">                        <span class="k">if</span> <span class="n">m</span><span class="p">:</span>
-</div><div id="l452" class="code_block">                            <span class="k">return</span> <span class="n">el</span>
-</div><div id="l453" class="code_block">            <span class="k">else</span><span class="p">:</span>
-</div><div id="l454" class="code_block">                <span class="k">for</span> <span class="n">att</span> <span class="ow">in</span> <span class="n">atts</span><span class="p">[:]:</span>
-</div><div id="l455" class="code_block">                    <span class="n">val_text</span> <span class="o">=</span> <span class="n">el</span><span class="o">.</span><span class="n">getAttribute</span><span class="p">(</span><span class="n">att</span><span class="p">)</span>
-</div><div id="l456" class="code_block">                    <span class="k">if</span> <span class="n">val_text</span> <span class="o">!=</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l457" class="code_block">                        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">val_text</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
-</div><div id="l458" class="code_block">                            <span class="n">val_text</span> <span class="o">=</span> <span class="n">val_text</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
-</div><div id="l459" class="code_block">                            
-</div><div id="l460" class="code_block">                        <span class="k">if</span> <span class="n">val_text</span> <span class="o">==</span> <span class="n">val</span><span class="p">:</span>
-</div><div id="l461" class="code_block">                            <span class="k">return</span> <span class="n">el</span>
-</div><div id="l462" class="code_block">
-</div><div id="l463" class="code_block">        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** find_element() did not find &quot;</span> <span class="o">+</span> <span class="n">tag</span> <span class="o">+</span> <span class="s2">&quot;-&quot;</span> <span class="o">+</span> <span class="n">attributes</span> <span class="o">+</span> <span class="s2">&quot;-&quot;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">val</span><span class="p">))</span>
-</div><div id="l464" class="code_block">        <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l465" class="code_block">
-</div><div id="l466" class="code_block">    <span class="k">def</span> <span class="nf">find_element_by_index</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">index_num</span><span class="p">,</span> <span class="n">element_filter</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">element_list</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l467" class="code_block">        <span class="sd">&quot;&quot;&quot; Find a specific element based on tag and the index number.</span>
-</div><div id="l468" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l469" class="code_block"><span class="sd">                tag             - The HTML tag name</span>
-</div><div id="l470" class="code_block"><span class="sd">                index_num        - The index number of the element</span>
-</div><div id="l471" class="code_block"><span class="sd">                attributes      - The semi-colon seperated tag attribute to search for</span>
-</div><div id="l472" class="code_block"><span class="sd">                val             - The attribute value to match</span>
-</div><div id="l473" class="code_block"><span class="sd">                [element_list]   - Find the element in the passed list</span>
-</div><div id="l474" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l475" class="code_block"><span class="sd">                The found element</span>
-</div><div id="l476" class="code_block"><span class="sd">        &quot;&quot;&quot;</span> 
-</div><div id="l477" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l478" class="code_block">            <span class="n">my_elements</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">element_filter</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">element_list</span><span class="o">=</span><span class="bp">None</span><span class="p">)</span>
-</div><div id="l479" class="code_block">            <span class="k">return</span> <span class="n">my_elements</span><span class="p">[</span><span class="n">index_num</span><span class="p">]</span>
-</div><div id="l480" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l481" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l482" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l483" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l484" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l485" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l486" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l487" class="code_block">
-</div><div id="l488" class="code_block">    <span class="k">def</span> <span class="nf">find_text</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">text</span><span class="p">):</span>
-</div><div id="l489" class="code_block">        <span class="sd">&quot;&quot;&quot;</span>
-</div><div id="l490" class="code_block"><span class="sd">            Searches for text on the Web Page</span>
-</div><div id="l491" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l492" class="code_block"><span class="sd">                text - text to search for</span>
-</div><div id="l493" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l494" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span>
-</div><div id="l495" class="code_block">        <span class="n">page_text</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">outer_html</span><span class="p">()</span>
-</div><div id="l496" class="code_block">        <span class="c1">#print pageText</span>
-</div><div id="l497" class="code_block">        
-</div><div id="l498" class="code_block">        <span class="c1"># Search the doc for the text    </span>
-</div><div id="l499" class="code_block">        <span class="n">text_found</span> <span class="o">=</span> <span class="n">page_text</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
-</div><div id="l500" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l501" class="code_block">            <span class="c1"># A &quot;-1&quot; means nothing is found</span>
-</div><div id="l502" class="code_block">            <span class="k">if</span> <span class="n">text_found</span> <span class="ow">is</span> <span class="ow">not</span> <span class="o">-</span><span class="mi">1</span><span class="p">:</span>
-</div><div id="l503" class="code_block">                <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l504" class="code_block">            <span class="k">else</span><span class="p">:</span>
-</div><div id="l505" class="code_block">                <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;Text </span><span class="si">%s</span><span class="s2"> Not Found!&quot;</span> <span class="o">%</span><span class="p">(</span><span class="n">text</span><span class="p">))</span>
-</div><div id="l506" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l507" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l508" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l509" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l510" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l511" class="code_block">
-</div><div id="l512" class="code_block">    <span class="k">def</span> <span class="nf">fire_element_event</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">control_name</span><span class="p">,</span> <span class="n">event_name</span><span class="p">):</span>
-</div><div id="l513" class="code_block">        <span class="sd">&quot;&quot;&quot; Fire a named event for a given control</span>
-</div><div id="l514" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l515" class="code_block"><span class="sd">                tag         - The HTML tag name</span>
-</div><div id="l516" class="code_block"><span class="sd">                controlName - the control to act on</span>
-</div><div id="l517" class="code_block"><span class="sd">                eventName   - the event name to signal</span>
-</div><div id="l518" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l519" class="code_block"><span class="sd">                True on success, else False</span>
-</div><div id="l520" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l521" class="code_block">        <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="n">control_name</span><span class="p">)</span>
-</div><div id="l522" class="code_block">        <span class="k">if</span> <span class="n">found_element</span><span class="p">:</span>
-</div><div id="l523" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l524" class="code_block">            <span class="n">found_element</span><span class="o">.</span><span class="n">FireEvent</span><span class="p">(</span><span class="n">event_name</span><span class="p">)</span>
-</div><div id="l525" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l526" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l527" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;fireEvent() did not find &quot;</span> <span class="o">+</span> <span class="n">control_name</span> <span class="o">+</span> <span class="s2">&quot; control.&quot;</span><span class="p">)</span>
-</div><div id="l528" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l529" class="code_block">
-</div><div id="l530" class="code_block">    <span class="k">def</span> <span class="nf">find_window</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">title</span><span class="p">,</span> <span class="n">index_num</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
-</div><div id="l531" class="code_block">        <span class="sd">&quot;&quot;&quot; Finds all ie open windows returns them if title matches.</span>
-</div><div id="l532" class="code_block"><span class="sd">        parameters:</span>
-</div><div id="l533" class="code_block"><span class="sd">            title         - The window title to find</span>
-</div><div id="l534" class="code_block"><span class="sd">            [indexNum]    - The index number of the window to find</span>
-</div><div id="l535" class="code_block"><span class="sd">        returns:</span>
-</div><div id="l536" class="code_block"><span class="sd">            The window if found, else None</span>
-</div><div id="l537" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l538" class="code_block">        <span class="n">this_count</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_time_out</span>
-</div><div id="l539" class="code_block">        <span class="n">found</span> <span class="o">=</span> <span class="bp">False</span>
-</div><div id="l540" class="code_block">        <span class="k">while</span> <span class="ow">not</span> <span class="n">found</span><span class="p">:</span>
-</div><div id="l541" class="code_block">            <span class="n">shell_wnd</span> <span class="o">=</span> <span class="n">win32com</span><span class="o">.</span><span class="n">client</span><span class="o">.</span><span class="n">DispatchEx</span><span class="p">(</span><span class="s1">&#39;Shell.Application&#39;</span><span class="p">)</span>
-</div><div id="l542" class="code_block">            <span class="n">wins</span> <span class="o">=</span> <span class="n">shell_wnd</span><span class="o">.</span><span class="n">Windows</span><span class="p">()</span>
-</div><div id="l543" class="code_block">            <span class="n">wins_count</span> <span class="o">=</span> <span class="n">wins</span><span class="o">.</span><span class="n">Count</span>
-</div><div id="l544" class="code_block">            <span class="n">index_cnt</span> <span class="o">=</span> <span class="mi">1</span>
-</div><div id="l545" class="code_block">
-</div><div id="l546" class="code_block">            <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="o">.</span><span class="mi">5</span><span class="p">)</span>
-</div><div id="l547" class="code_block">            <span class="n">this_count</span> <span class="o">=</span> <span class="n">this_count</span> <span class="o">-</span> <span class="mi">5</span>
-</div><div id="l548" class="code_block">            <span class="k">if</span> <span class="n">this_count</span> <span class="o">&lt;</span> <span class="mi">1</span><span class="p">:</span> <span class="k">break</span>
-</div><div id="l549" class="code_block">
-</div><div id="l550" class="code_block">            <span class="k">for</span> <span class="n">index</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">wins_count</span><span class="p">):</span>
-</div><div id="l551" class="code_block">                <span class="k">try</span><span class="p">:</span>
-</div><div id="l552" class="code_block">                    <span class="n">ieObj</span> <span class="o">=</span> <span class="n">wins</span><span class="o">.</span><span class="n">Item</span><span class="p">(</span><span class="n">index</span><span class="p">)</span>
-</div><div id="l553" class="code_block">                    <span class="n">doc</span> <span class="o">=</span> <span class="n">ieObj</span><span class="o">.</span><span class="n">Document</span>
-</div><div id="l554" class="code_block">                    
-</div><div id="l555" class="code_block">                    <span class="k">if</span> <span class="n">doc</span><span class="o">.</span><span class="n">title</span> <span class="o">==</span> <span class="n">title</span><span class="p">:</span>
-</div><div id="l556" class="code_block">                        <span class="k">if</span> <span class="n">index_cnt</span> <span class="o">==</span> <span class="n">index_num</span><span class="p">:</span>
-</div><div id="l557" class="code_block">                            <span class="k">return</span> <span class="n">ieObj</span>
-</div><div id="l558" class="code_block">                        <span class="n">index_cnt</span> <span class="o">+=</span> <span class="mi">1</span>
-</div><div id="l559" class="code_block">                    <span class="k">elif</span> <span class="n">ieObj</span><span class="o">.</span><span class="n">LocationName</span> <span class="o">==</span> <span class="n">title</span><span class="p">:</span>
-</div><div id="l560" class="code_block">                        <span class="k">if</span> <span class="n">index_cnt</span> <span class="o">==</span> <span class="n">index_num</span><span class="p">:</span>
-</div><div id="l561" class="code_block">                            <span class="k">return</span> <span class="n">ieObj</span>
-</div><div id="l562" class="code_block">                        <span class="n">index_cnt</span> <span class="o">+=</span> <span class="mi">1</span>
-</div><div id="l563" class="code_block">                <span class="k">except</span><span class="p">:</span>
-</div><div id="l564" class="code_block">                    <span class="k">pass</span>
-</div><div id="l565" class="code_block">
-</div><div id="l566" class="code_block">        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** windowFind() did not find the &quot;</span> <span class="o">+</span> <span class="n">title</span> <span class="o">+</span> <span class="s2">&quot;-&quot;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">index_num</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot; window.&quot;</span><span class="p">)</span>
-</div><div id="l567" class="code_block">        <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l568" class="code_block">      
-</div><div id="l569" class="code_block">
-</div><div id="l570" class="code_block">    <span class="k">def</span> <span class="nf">form_exists</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l571" class="code_block">        <span class="sd">&quot;&quot;&quot; Checks to see if a form exists</span>
-</div><div id="l572" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l573" class="code_block"><span class="sd">                None</span>
-</div><div id="l574" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l575" class="code_block"><span class="sd">                True if the form is found, else False</span>
-</div><div id="l576" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l577" class="code_block">        <span class="n">my_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_form</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l578" class="code_block">        <span class="k">if</span> <span class="n">my_element</span><span class="p">:</span>
-</div><div id="l579" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l580" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l581" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l582" class="code_block">
-</div><div id="l583" class="code_block">    <span class="k">def</span> <span class="nf">frame_exists</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l584" class="code_block">        <span class="sd">&quot;&quot;&quot; Checks to see if a frame exists</span>
-</div><div id="l585" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l586" class="code_block"><span class="sd">                name   - The id or name of the frame</span>
-</div><div id="l587" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l588" class="code_block"><span class="sd">                True if the frame is found, else False</span>
-</div><div id="l589" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l590" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span>
-</div><div id="l591" class="code_block">        
-</div><div id="l592" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l593" class="code_block">            <span class="n">frames</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">frames</span>
-</div><div id="l594" class="code_block">            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">frames</span><span class="o">.</span><span class="n">length</span><span class="p">):</span>
-</div><div id="l595" class="code_block">                <span class="k">if</span> <span class="n">frames</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="n">name</span><span class="p">:</span>
-</div><div id="l596" class="code_block">                    <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l597" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l598" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l599" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l600" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l601" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l602" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l603" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l604" class="code_block">            <span class="k">return</span> <span class="bp">False</span>         
-</div><div id="l605" class="code_block">
-</div><div id="l606" class="code_block">    <span class="k">def</span> <span class="nf">get_body_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">attribute</span><span class="p">):</span>
-</div><div id="l607" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the value of an attribute on the document.</span>
-</div><div id="l608" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l609" class="code_block"><span class="sd">                attribute   - The name of the attribute to get the value for</span>
-</div><div id="l610" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l611" class="code_block"><span class="sd">                The value of the attribute</span>
-</div><div id="l612" class="code_block"><span class="sd">            examples:</span>
-</div><div id="l613" class="code_block"><span class="sd">                val = getBodyValue(&quot;id&quot;)</span>
-</div><div id="l614" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l615" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span> 
-</div><div id="l616" class="code_block">        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame_name</span><span class="p">:</span>
-</div><div id="l617" class="code_block">            <span class="n">my_doc</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">frames</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">frame_name</span><span class="p">]</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">body</span> 
-</div><div id="l618" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l619" class="code_block">            <span class="n">my_doc</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">body</span> 
-</div><div id="l620" class="code_block">        
-</div><div id="l621" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_element_value</span><span class="p">(</span><span class="n">my_doc</span><span class="p">,</span> <span class="n">attribute</span><span class="p">)</span>         
-</div><div id="l622" class="code_block">
-</div><div id="l623" class="code_block">    <span class="k">def</span> <span class="nf">get_button</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l624" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a button</span>
-</div><div id="l625" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l626" class="code_block"><span class="sd">                name   - The id, name, value or index of the button.</span>
-</div><div id="l627" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l628" class="code_block"><span class="sd">                The button if found, else None</span>
-</div><div id="l629" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l630" class="code_block">        <span class="n">my_elements</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;type=submit;type=button&quot;</span><span class="p">)</span>
-</div><div id="l631" class="code_block">
-</div><div id="l632" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l633" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element_by_index</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="bp">None</span><span class="p">,</span> <span class="n">my_elements</span><span class="p">)</span>
-</div><div id="l634" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l635" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;id;name;value&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">my_elements</span><span class="p">)</span>
-</div><div id="l636" class="code_block">        
-</div><div id="l637" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l638" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getButton() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l639" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l640" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l641" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l642" class="code_block">            <span class="k">return</span> <span class="n">found_element</span>
-</div><div id="l643" class="code_block">
-</div><div id="l644" class="code_block">    <span class="k">def</span> <span class="nf">get_button_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">attribute</span><span class="p">):</span>
-</div><div id="l645" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the value of an attribute on a button</span>
-</div><div id="l646" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l647" class="code_block"><span class="sd">                name        - The id, name, value or index of the button, or a button element.</span>
-</div><div id="l648" class="code_block"><span class="sd">                attribute   - The name of the attribute to get the value for</span>
-</div><div id="l649" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l650" class="code_block"><span class="sd">                The value of the attribute</span>
-</div><div id="l651" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l652" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l653" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_button</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l654" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l655" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l656" class="code_block">
-</div><div id="l657" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l658" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getButtonValue() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l659" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l660" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l661" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l662" class="code_block">            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">getElementValue</span><span class="p">(</span><span class="n">found_element</span><span class="p">,</span> <span class="n">attribute</span><span class="p">)</span>
-</div><div id="l663" class="code_block">
-</div><div id="l664" class="code_block">
-</div><div id="l665" class="code_block">    <span class="k">def</span> <span class="nf">get_buttons</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">btn_filter</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l666" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets all the buttons</span>
-</div><div id="l667" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l668" class="code_block"><span class="sd">                [filter]    - Get only buttons specified by the filter</span>
-</div><div id="l669" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l670" class="code_block"><span class="sd">                A list of buttons</span>
-</div><div id="l671" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l672" class="code_block">        <span class="k">if</span> <span class="n">btn_filter</span><span class="p">:</span>
-</div><div id="l673" class="code_block">            <span class="n">btn_filter</span> <span class="o">=</span> <span class="s2">&quot;type=submit;&quot;</span> <span class="o">+</span> <span class="n">btn_filter</span>
-</div><div id="l674" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l675" class="code_block">            <span class="n">btn_filter</span> <span class="o">=</span> <span class="s2">&quot;type=submit&quot;</span>
-</div><div id="l676" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="n">btn_filter</span><span class="p">)</span>
-</div><div id="l677" class="code_block">
-</div><div id="l678" class="code_block">    <span class="k">def</span> <span class="nf">get_buttons_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">attribute</span><span class="p">,</span> <span class="n">btn_filter</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l679" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a list of values for the specified attribute</span>
-</div><div id="l680" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l681" class="code_block"><span class="sd">                attribute   - The name of the attribute to get the value for</span>
-</div><div id="l682" class="code_block"><span class="sd">                [filter]    - Get only buttons specified by the filter</span>
-</div><div id="l683" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l684" class="code_block"><span class="sd">                A list of the specified value of the attribute</span>
-</div><div id="l685" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l686" class="code_block">        <span class="n">my_values</span><span class="o">=</span><span class="p">[]</span>
-</div><div id="l687" class="code_block">        <span class="n">my_buttons</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_buttons</span><span class="p">()</span>
-</div><div id="l688" class="code_block">        <span class="k">for</span> <span class="n">button</span> <span class="ow">in</span> <span class="n">my_buttons</span><span class="p">[:]:</span>
-</div><div id="l689" class="code_block">            <span class="n">my_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">button</span><span class="o">.</span><span class="n">getAttribute</span><span class="p">(</span><span class="n">attribute</span><span class="p">))</span>
-</div><div id="l690" class="code_block">        <span class="k">return</span> <span class="n">my_values</span>
-</div><div id="l691" class="code_block">
-</div><div id="l692" class="code_block">    <span class="k">def</span> <span class="nf">get_checkbox</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l693" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a checkbox</span>
-</div><div id="l694" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l695" class="code_block"><span class="sd">                name   - The id, name, or value of the checkbox.</span>
-</div><div id="l696" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l697" class="code_block"><span class="sd">                The checkbox if found, else None</span>
-</div><div id="l698" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l699" class="code_block">        <span class="n">my_elements</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;type=checkbox&quot;</span><span class="p">)</span>
-</div><div id="l700" class="code_block">        <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;id;name;value&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">my_elements</span><span class="p">)</span>
-</div><div id="l701" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l702" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getCheckBox() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l703" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l704" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l705" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l706" class="code_block">            <span class="k">return</span> <span class="n">found_element</span>
-</div><div id="l707" class="code_block">        
-</div><div id="l708" class="code_block">    <span class="k">def</span> <span class="nf">get_checkbox_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">attribute</span><span class="p">):</span>
-</div><div id="l709" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a checkbox</span>
-</div><div id="l710" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l711" class="code_block"><span class="sd">                name        - The id, name, or value of the checkbox, or a checkbox element.</span>
-</div><div id="l712" class="code_block"><span class="sd">                attribute   - The name of the attribute to get the value for</span>
-</div><div id="l713" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l714" class="code_block"><span class="sd">                The checkbox if found, else None</span>
-</div><div id="l715" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l716" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l717" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_checkbox</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l718" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l719" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l720" class="code_block">        
-</div><div id="l721" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l722" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getCheckBoxValue() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l723" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l724" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l725" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l726" class="code_block">            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">getElementValue</span><span class="p">(</span><span class="n">found_element</span><span class="p">,</span> <span class="n">attribute</span><span class="p">)</span>
-</div><div id="l727" class="code_block">
-</div><div id="l728" class="code_block">   
-</div><div id="l729" class="code_block">    <span class="k">def</span> <span class="nf">get_checkboxes</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cbfilter</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l730" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets all the checkboxes</span>
-</div><div id="l731" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l732" class="code_block"><span class="sd">                [filter]    - Get only checkboxes specified by the filter</span>
-</div><div id="l733" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l734" class="code_block"><span class="sd">                A list of checkboxes</span>
-</div><div id="l735" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l736" class="code_block">        <span class="k">if</span> <span class="n">cbfilter</span><span class="p">:</span>
-</div><div id="l737" class="code_block">            <span class="n">cbfilter</span> <span class="o">=</span> <span class="s2">&quot;type=checkbox;&quot;</span> <span class="o">+</span> <span class="n">cbfilter</span>
-</div><div id="l738" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l739" class="code_block">            <span class="n">cbfilter</span> <span class="o">=</span> <span class="s2">&quot;type=checkbox&quot;</span>
-</div><div id="l740" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="n">cbfilter</span><span class="p">)</span>
-</div><div id="l741" class="code_block">
-</div><div id="l742" class="code_block">    <span class="k">def</span> <span class="nf">get_checkboxes_checked</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l743" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a list of checked checkbox values for a specified checkbox name</span>
-</div><div id="l744" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l745" class="code_block"><span class="sd">                name - checkbox name</span>
-</div><div id="l746" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l747" class="code_block"><span class="sd">                A list of checked values for the checkbox group</span>
-</div><div id="l748" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l749" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_checkboxes</span><span class="p">(</span><span class="s2">&quot;type=checkbox;checked=True;name=&quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l750" class="code_block">    
-</div><div id="l751" class="code_block">    <span class="k">def</span> <span class="nf">get_checkboxes_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">attribute</span><span class="p">,</span> <span class="n">cbfilter</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l752" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the value of an attribute for all the checkboxes</span>
-</div><div id="l753" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l754" class="code_block"><span class="sd">                attribute   - The name of the attribute to get the value for</span>
-</div><div id="l755" class="code_block"><span class="sd">                [cbfilter]    - Get only checkboxes specified by the filter</span>
-</div><div id="l756" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l757" class="code_block"><span class="sd">                A list of the specified value of the attribute</span>
-</div><div id="l758" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l759" class="code_block">        <span class="n">my_values</span><span class="o">=</span><span class="p">[]</span>
-</div><div id="l760" class="code_block">        <span class="n">myCheckBoxes</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">getCheckBoxes</span><span class="p">()</span>
-</div><div id="l761" class="code_block">        <span class="k">for</span> <span class="n">checkbox</span> <span class="ow">in</span> <span class="n">myCheckBoxes</span><span class="p">[:]:</span>
-</div><div id="l762" class="code_block">            <span class="n">my_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">checkbox</span><span class="o">.</span><span class="n">getAttribute</span><span class="p">(</span><span class="n">attribute</span><span class="p">))</span>
-</div><div id="l763" class="code_block">        <span class="k">return</span> <span class="n">my_values</span>
-</div><div id="l764" class="code_block">
-</div><div id="l765" class="code_block">    <span class="k">def</span> <span class="nf">get_config</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span><span class="n">cfpath</span><span class="p">):</span>
-</div><div id="l766" class="code_block">        <span class="sd">&quot;&quot;&quot; Set the config path&quot;&quot;&quot;</span>
-</div><div id="l767" class="code_block">       
-</div><div id="l768" class="code_block">        <span class="n">pathname</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
-</div><div id="l769" class="code_block">        <span class="n">pathname</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">chdir</span><span class="p">(</span><span class="s1">&#39;..&#39;</span><span class="p">)</span>
-</div><div id="l770" class="code_block">        <span class="n">path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">pathname</span><span class="p">)</span>
-</div><div id="l771" class="code_block">        <span class="n">path</span> <span class="o">=</span> <span class="n">path</span> <span class="o">+</span> <span class="n">cfpath</span>
-</div><div id="l772" class="code_block">        <span class="k">return</span> <span class="n">path</span> 
-</div><div id="l773" class="code_block">
-</div><div id="l774" class="code_block">
-</div><div id="l775" class="code_block">    <span class="k">def</span> <span class="nf">get_cookie</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</div><div id="l776" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the Cookie information for the current page</span>
-</div><div id="l777" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l778" class="code_block"><span class="sd">                None</span>
-</div><div id="l779" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l780" class="code_block"><span class="sd">                The Cookie information of the current page</span>
-</div><div id="l781" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l782" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span> 
-</div><div id="l783" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">cookie</span>
-</div><div id="l784" class="code_block">        
-</div><div id="l785" class="code_block">    <span class="k">def</span> <span class="nf">get_div</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l786" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a div</span>
-</div><div id="l787" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l788" class="code_block"><span class="sd">                name   - The id, name, or index of the div</span>
-</div><div id="l789" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l790" class="code_block"><span class="sd">                The div if found, else None</span>
-</div><div id="l791" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l792" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l793" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element_by_index</span><span class="p">(</span><span class="s2">&quot;div&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l794" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l795" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="s2">&quot;div&quot;</span><span class="p">,</span> <span class="s2">&quot;id;name&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l796" class="code_block">
-</div><div id="l797" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l798" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getDiv() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l799" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l800" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l801" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l802" class="code_block">            <span class="k">return</span> <span class="n">found_element</span>
-</div><div id="l803" class="code_block">
-</div><div id="l804" class="code_block">    <span class="k">def</span> <span class="nf">get_div_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">attribute</span><span class="p">):</span>
-</div><div id="l805" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the value of an attribute on a div.</span>
-</div><div id="l806" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l807" class="code_block"><span class="sd">                name        - The id, name, or index of the div, or a div element.</span>
-</div><div id="l808" class="code_block"><span class="sd">                attribute   - The name of the attribute to get the value for</span>
-</div><div id="l809" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l810" class="code_block"><span class="sd">                The value of the attribute</span>
-</div><div id="l811" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l812" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l813" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">getDiv</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l814" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l815" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l816" class="code_block">            
-</div><div id="l817" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l818" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getDivValue() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l819" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l820" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l821" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l822" class="code_block">            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">getElementValue</span><span class="p">(</span><span class="n">found_element</span><span class="p">,</span> <span class="n">attribute</span><span class="p">)</span>
-</div><div id="l823" class="code_block">
-</div><div id="l824" class="code_block">    <span class="k">def</span> <span class="nf">get_divs</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">filter</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l825" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a list of divs</span>
-</div><div id="l826" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l827" class="code_block"><span class="sd">                [filter]    - Get only buttons specified by the filter</span>
-</div><div id="l828" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l829" class="code_block"><span class="sd">                A list of divs</span>
-</div><div id="l830" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l831" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="s2">&quot;div&quot;</span><span class="p">,</span> <span class="nb">filter</span><span class="p">)</span>
-</div><div id="l832" class="code_block">            
-</div><div id="l833" class="code_block">    <span class="k">def</span> <span class="nf">get_divs_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">attribute</span><span class="p">,</span> <span class="nb">filter</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l834" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a list of values for the specified attribute.</span>
-</div><div id="l835" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l836" class="code_block"><span class="sd">                attribute   - The name of the attribute to get the value for</span>
-</div><div id="l837" class="code_block"><span class="sd">                [filter]    - Get only divs specified by the filter</span>
-</div><div id="l838" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l839" class="code_block"><span class="sd">                A list of images</span>
-</div><div id="l840" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l841" class="code_block">        <span class="n">my_values</span><span class="o">=</span><span class="p">[]</span>
-</div><div id="l842" class="code_block">        <span class="n">my_divs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_divs</span><span class="p">(</span><span class="nb">filter</span><span class="p">)</span>
-</div><div id="l843" class="code_block">        <span class="k">for</span> <span class="n">div</span> <span class="ow">in</span> <span class="n">my_divs</span><span class="p">[:]:</span>
-</div><div id="l844" class="code_block">            <span class="n">my_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">div</span><span class="o">.</span><span class="n">getAttribute</span><span class="p">(</span><span class="n">attribute</span><span class="p">))</span>
-</div><div id="l845" class="code_block">        <span class="k">return</span> <span class="n">my_values</span>
-</div><div id="l846" class="code_block">                
-</div><div id="l847" class="code_block">    <span class="k">def</span> <span class="nf">get_element_children</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">element</span><span class="p">,</span> <span class="nb">all</span><span class="o">=</span><span class="bp">True</span><span class="p">):</span>
-</div><div id="l848" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a list of children for the specified element</span>
-</div><div id="l849" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l850" class="code_block"><span class="sd">                element       - The element</span>
-</div><div id="l851" class="code_block"><span class="sd">                elementList   - The attribute name</span>
-</div><div id="l852" class="code_block"><span class="sd">                [all]         - True gets all descendants, False gets direct children only</span>
-</div><div id="l853" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l854" class="code_block"><span class="sd">                The value of the attribute.</span>
-</div><div id="l855" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>         
-</div><div id="l856" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l857" class="code_block">            <span class="n">count</span> <span class="o">=</span> <span class="mi">0</span>
-</div><div id="l858" class="code_block">            <span class="n">my_elements</span> <span class="o">=</span> <span class="p">[]</span>
-</div><div id="l859" class="code_block">            <span class="k">if</span> <span class="nb">all</span><span class="p">:</span>
-</div><div id="l860" class="code_block">                <span class="n">elements</span> <span class="o">=</span> <span class="n">element</span><span class="o">.</span><span class="n">all</span>
-</div><div id="l861" class="code_block">            <span class="k">else</span><span class="p">:</span>
-</div><div id="l862" class="code_block">                <span class="n">elements</span> <span class="o">=</span> <span class="n">element</span><span class="o">.</span><span class="n">childNodes</span>
-</div><div id="l863" class="code_block">
-</div><div id="l864" class="code_block">            <span class="k">while</span> <span class="n">count</span> <span class="o">&lt;</span> <span class="n">elements</span><span class="o">.</span><span class="n">length</span><span class="p">:</span>
-</div><div id="l865" class="code_block">                <span class="n">my_elements</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">elements</span><span class="p">[</span><span class="n">count</span><span class="p">])</span>
-</div><div id="l866" class="code_block">                <span class="n">count</span> <span class="o">+=</span><span class="mi">1</span>
-</div><div id="l867" class="code_block">            
-</div><div id="l868" class="code_block">            <span class="k">return</span> <span class="n">my_elements</span>
-</div><div id="l869" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l870" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l871" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l872" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l873" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l874" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l875" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l876" class="code_block">        
-</div><div id="l877" class="code_block">    <span class="k">def</span> <span class="nf">get_element_parent</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">element</span><span class="p">):</span>
-</div><div id="l878" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the parent of the passed element.</span>
-</div><div id="l879" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l880" class="code_block"><span class="sd">                element       - The element</span>
-</div><div id="l881" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l882" class="code_block"><span class="sd">                The parent element</span>
-</div><div id="l883" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>         
-</div><div id="l884" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l885" class="code_block">            <span class="k">return</span> <span class="n">element</span><span class="o">.</span><span class="n">parentElement</span>
-</div><div id="l886" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l887" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l888" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l889" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l890" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l891" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l892" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l893" class="code_block">       
-</div><div id="l894" class="code_block">    <span class="k">def</span> <span class="nf">get_element_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">element</span><span class="p">,</span> <span class="n">attribute</span><span class="p">):</span>
-</div><div id="l895" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the value of the attribute from the element.</span>
-</div><div id="l896" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l897" class="code_block"><span class="sd">                element       - The element</span>
-</div><div id="l898" class="code_block"><span class="sd">                elementList   - The attribute name</span>
-</div><div id="l899" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l900" class="code_block"><span class="sd">                The value of the attribute.</span>
-</div><div id="l901" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>         
-</div><div id="l902" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l903" class="code_block">            <span class="k">return</span> <span class="n">element</span><span class="o">.</span><span class="n">getAttribute</span><span class="p">(</span><span class="n">attribute</span><span class="p">)</span>
-</div><div id="l904" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l905" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l906" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l907" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l908" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l909" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l910" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l911" class="code_block">        
-</div><div id="l912" class="code_block">    <span class="k">def</span> <span class="nf">get_elements_list</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">elem_filter</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">element_list</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l913" class="code_block">        <span class="sd">&quot;&quot;&quot; Sets the specified attribute of any element</span>
-</div><div id="l914" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l915" class="code_block"><span class="sd">                tag        - The HTML tag name</span>
-</div><div id="l916" class="code_block"><span class="sd">                [elem_filter]   - Only return elements that match this filter in format</span>
-</div><div id="l917" class="code_block"><span class="sd">                             (att1=val1;att2=val2), ie. &quot;type=checkbox;checked=True&quot;</span>
-</div><div id="l918" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l919" class="code_block"><span class="sd">                A filtered list of the found elements</span>
-</div><div id="l920" class="code_block"><span class="sd">        &quot;&quot;&quot;</span> 
-</div><div id="l921" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span>
-</div><div id="l922" class="code_block">
-</div><div id="l923" class="code_block">        <span class="k">if</span> <span class="n">element_list</span><span class="p">:</span>
-</div><div id="l924" class="code_block">            <span class="n">all_elements</span> <span class="o">=</span> <span class="n">element_list</span>
-</div><div id="l925" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l926" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame_name</span><span class="p">:</span>
-</div><div id="l927" class="code_block">                <span class="n">my_frame</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_frame</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">frame_name</span><span class="p">)</span> 
-</div><div id="l928" class="code_block">                
-</div><div id="l929" class="code_block">                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">form_name</span><span class="p">:</span>
-</div><div id="l930" class="code_block">                    <span class="n">elements</span> <span class="o">=</span> <span class="n">my_frame</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">forms</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">form_name</span><span class="p">]</span><span class="o">.</span><span class="n">getElementsByTagName</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
-</div><div id="l931" class="code_block">                <span class="k">else</span><span class="p">:</span>
-</div><div id="l932" class="code_block">                    <span class="n">elements</span> <span class="o">=</span> <span class="n">my_frame</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">getElementsByTagName</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
-</div><div id="l933" class="code_block">            <span class="k">else</span><span class="p">:</span>
-</div><div id="l934" class="code_block">                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">form_name</span><span class="p">:</span>
-</div><div id="l935" class="code_block">                    <span class="n">elements</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">forms</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">form_name</span><span class="p">]</span><span class="o">.</span><span class="n">getElementsByTagName</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
-</div><div id="l936" class="code_block">                <span class="k">else</span><span class="p">:</span>
-</div><div id="l937" class="code_block">                    <span class="n">elements</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">getElementsByTagName</span><span class="p">(</span><span class="n">tag</span><span class="p">)</span>
-</div><div id="l938" class="code_block">                    
-</div><div id="l939" class="code_block">            <span class="c1"># Convert the IE COM object to a list</span>
-</div><div id="l940" class="code_block">            <span class="n">count</span> <span class="o">=</span> <span class="mi">0</span>
-</div><div id="l941" class="code_block">            <span class="n">all_elements</span> <span class="o">=</span> <span class="p">[]</span>
-</div><div id="l942" class="code_block">            <span class="k">while</span> <span class="n">count</span> <span class="o">&lt;</span> <span class="n">elements</span><span class="o">.</span><span class="n">length</span><span class="p">:</span>
-</div><div id="l943" class="code_block">                <span class="n">all_elements</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">elements</span><span class="p">[</span><span class="n">count</span><span class="p">])</span>
-</div><div id="l944" class="code_block">                <span class="n">count</span> <span class="o">+=</span><span class="mi">1</span>
-</div><div id="l945" class="code_block">
-</div><div id="l946" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l947" class="code_block">            <span class="k">if</span> <span class="n">elem_filter</span><span class="p">:</span>
-</div><div id="l948" class="code_block">                <span class="n">my_elements</span> <span class="o">=</span> <span class="p">[]</span>
-</div><div id="l949" class="code_block">                <span class="n">elem_filter</span> <span class="o">=</span> <span class="nb">filter</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;;&quot;</span><span class="p">)</span>
-</div><div id="l950" class="code_block">                <span class="k">for</span> <span class="n">el</span> <span class="ow">in</span> <span class="n">all_elements</span><span class="p">:</span>
-</div><div id="l951" class="code_block">                    <span class="n">match</span> <span class="o">=</span> <span class="bp">False</span> 
-</div><div id="l952" class="code_block">                    <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">elem_filter</span><span class="p">[:]:</span>
-</div><div id="l953" class="code_block">                        <span class="n">atts</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="p">)</span>
-</div><div id="l954" class="code_block">                        <span class="n">val_text</span> <span class="o">=</span> <span class="n">el</span><span class="o">.</span><span class="n">getAttribute</span><span class="p">(</span><span class="n">atts</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
-</div><div id="l955" class="code_block">                        <span class="k">if</span> <span class="n">val_text</span> <span class="o">!=</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l956" class="code_block">                            <span class="n">val_text</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">val_text</span><span class="p">)</span>
-</div><div id="l957" class="code_block">                            <span class="n">val_text</span> <span class="o">=</span> <span class="n">val_text</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
-</div><div id="l958" class="code_block">                            <span class="n">val_text</span> <span class="o">=</span> <span class="n">val_text</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
-</div><div id="l959" class="code_block">                            <span class="n">wantText</span> <span class="o">=</span> <span class="n">atts</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
-</div><div id="l960" class="code_block">                            <span class="k">if</span> <span class="n">val_text</span> <span class="o">==</span> <span class="n">wantText</span><span class="p">:</span>
-</div><div id="l961" class="code_block">                                <span class="n">match</span> <span class="o">=</span> <span class="bp">True</span>
-</div><div id="l962" class="code_block">                    <span class="k">if</span> <span class="n">match</span><span class="p">:</span>
-</div><div id="l963" class="code_block">                        <span class="n">my_elements</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">el</span><span class="p">)</span>
-</div><div id="l964" class="code_block">            <span class="k">else</span><span class="p">:</span>
-</div><div id="l965" class="code_block">                <span class="n">my_elements</span> <span class="o">=</span> <span class="n">all_elements</span>
-</div><div id="l966" class="code_block">                
-</div><div id="l967" class="code_block">            <span class="k">return</span> <span class="n">my_elements</span>
-</div><div id="l968" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l969" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l970" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l971" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l972" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l973" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l974" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l975" class="code_block">        
-</div><div id="l976" class="code_block">
-</div><div id="l977" class="code_block">    <span class="k">def</span> <span class="nf">get_error_text</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">class_name</span><span class="p">):</span>
-</div><div id="l978" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the Error Text</span>
-</div><div id="l979" class="code_block"><span class="sd">        This is only an example you may need to tweak for you needs</span>
-</div><div id="l980" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l981" class="code_block"><span class="sd">                redTxtSmall   - This is the class name for the error text</span>
-</div><div id="l982" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l983" class="code_block"><span class="sd">                The the innerText of that class, else None</span>
-</div><div id="l984" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l985" class="code_block">        <span class="k">pass</span>
-</div><div id="l986" class="code_block">      
-</div><div id="l987" class="code_block"><span class="c1">##      EXAMPLE Below</span>
-</div><div id="l988" class="code_block"><span class="c1">##        self._wait()</span>
-</div><div id="l989" class="code_block"><span class="c1">##        className = className</span>
-</div><div id="l990" class="code_block"><span class="c1">##        try:</span>
-</div><div id="l991" class="code_block"><span class="c1">##            doc = self._ie.Document.getElementsByTagName(&quot;SPAN&quot;)</span>
-</div><div id="l992" class="code_block"><span class="c1">##            for element in doc:</span>
-</div><div id="l993" class="code_block"><span class="c1">##                if element is None:break</span>
-</div><div id="l994" class="code_block"><span class="c1">##                if element.className == className :</span>
-</div><div id="l995" class="code_block"><span class="c1">##                    element.style.backgroundColor=&quot;cyan&quot;</span>
-</div><div id="l996" class="code_block"><span class="c1">##                    val = element.innertext</span>
-</div><div id="l997" class="code_block"><span class="c1">##                    # stripout any spaces</span>
-</div><div id="l998" class="code_block"><span class="c1">##                    val = val.strip()</span>
-</div><div id="l999" class="code_block"><span class="c1">##                    return val</span>
-</div><div id="l1000" class="code_block"><span class="c1">##        except:</span>
-</div><div id="l1001" class="code_block"><span class="c1">##            (ErrorType,ErrorValue,ErrorTB)=sys.exc_info()</span>
-</div><div id="l1002" class="code_block"><span class="c1">##            print sys.exc_info()</span>
-</div><div id="l1003" class="code_block"><span class="c1">##            traceback.print_exc(ErrorTB)</span>
-</div><div id="l1004" class="code_block"><span class="c1">##            return None</span>
-</div><div id="l1005" class="code_block">     
-</div><div id="l1006" class="code_block">    <span class="k">def</span> <span class="nf">get_form</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l1007" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a form</span>
-</div><div id="l1008" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1009" class="code_block"><span class="sd">                [name]    - The name, id or index of the form.</span>
-</div><div id="l1010" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1011" class="code_block"><span class="sd">                The form if found, else None</span>
-</div><div id="l1012" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1013" class="code_block">        <span class="k">if</span> <span class="n">name</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span> <span class="n">name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">form_name</span> 
-</div><div id="l1014" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l1015" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element_by_index</span><span class="p">(</span><span class="s2">&quot;form&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1016" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1017" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="s2">&quot;form&quot;</span><span class="p">,</span> <span class="s2">&quot;id;name&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1018" class="code_block">        
-</div><div id="l1019" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1020" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getForm() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1021" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1022" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1023" class="code_block">            <span class="k">return</span> <span class="n">found_element</span>
-</div><div id="l1024" class="code_block">
-</div><div id="l1025" class="code_block">    <span class="k">def</span> <span class="nf">get_form_control_names</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span> 
-</div><div id="l1026" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a list of controls for a given form</span>
-</div><div id="l1027" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1028" class="code_block"><span class="sd">                [name]   - the form name</span>
-</div><div id="l1029" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1030" class="code_block"><span class="sd">                a list of control names located in the form</span>
-</div><div id="l1031" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1032" class="code_block">        <span class="k">if</span> <span class="n">name</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span> <span class="n">name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">form_name</span> 
-</div><div id="l1033" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span>
-</div><div id="l1034" class="code_block">        <span class="n">d</span><span class="o">=</span><span class="p">[]</span>
-</div><div id="l1035" class="code_block">        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame_name</span><span class="p">:</span>
-</div><div id="l1036" class="code_block">            <span class="bp">self</span><span class="o">.</span><span class="n">_frame_wait</span><span class="p">()</span>
-</div><div id="l1037" class="code_block">            <span class="n">this_form</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">frames</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">frame_name</span><span class="p">]</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">forms</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">form_name</span><span class="p">]</span>
-</div><div id="l1038" class="code_block">        <span class="k">else</span><span class="p">:</span>            
-</div><div id="l1039" class="code_block">            <span class="n">this_form</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">forms</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">form_name</span><span class="p">]</span>
-</div><div id="l1040" class="code_block">        <span class="k">if</span> <span class="n">this_form</span><span class="o">!=</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1041" class="code_block">            <span class="k">for</span> <span class="n">control</span> <span class="ow">in</span> <span class="n">this_form</span><span class="p">:</span>
-</div><div id="l1042" class="code_block">                <span class="k">if</span> <span class="n">control</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span> <span class="k">break</span>        <span class="c1"># Some browser bug</span>
-</div><div id="l1043" class="code_block">                <span class="n">d</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">control</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l1044" class="code_block">        <span class="k">return</span> <span class="n">d</span>
-</div><div id="l1045" class="code_block">    
-</div><div id="l1046" class="code_block">    <span class="k">def</span> <span class="nf">get_form_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">attribute</span><span class="p">):</span>
-</div><div id="l1047" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the value of an attribute on a form</span>
-</div><div id="l1048" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1049" class="code_block"><span class="sd">                name        - The id, name or index of the form, or a form element.</span>
-</div><div id="l1050" class="code_block"><span class="sd">                attribute   - The name of the attribute to get the value for</span>
-</div><div id="l1051" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1052" class="code_block"><span class="sd">                The value of the attribute</span>
-</div><div id="l1053" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1054" class="code_block">        <span class="k">if</span> <span class="n">name</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span> <span class="n">name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">form_name</span> 
-</div><div id="l1055" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l1056" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_form</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l1057" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1058" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l1059" class="code_block">
-</div><div id="l1060" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1061" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getFormValue() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1062" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1063" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1064" class="code_block">            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">getElementValue</span><span class="p">(</span><span class="n">found_element</span><span class="p">,</span> <span class="n">attribute</span><span class="p">)</span>
-</div><div id="l1065" class="code_block">
-</div><div id="l1066" class="code_block">    <span class="k">def</span> <span class="nf">get_form_visible_control_names</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l1067" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a list of controls for a given form</span>
-</div><div id="l1068" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1069" class="code_block"><span class="sd">                [name]   - the form name</span>
-</div><div id="l1070" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1071" class="code_block"><span class="sd">                a list of visible control names located in the form</span>
-</div><div id="l1072" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1073" class="code_block">        <span class="k">if</span> <span class="n">name</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span> <span class="n">name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">form_name</span> 
-</div><div id="l1074" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span>
-</div><div id="l1075" class="code_block">        <span class="n">d</span><span class="o">=</span><span class="p">[]</span>
-</div><div id="l1076" class="code_block">        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame_name</span><span class="p">:</span>
-</div><div id="l1077" class="code_block">            <span class="n">this_form</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">frames</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">frame_name</span><span class="p">]</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">forms</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">form_name</span><span class="p">]</span>
-</div><div id="l1078" class="code_block">        <span class="k">else</span><span class="p">:</span>            
-</div><div id="l1079" class="code_block">            <span class="n">this_form</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">forms</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">form_name</span><span class="p">]</span>
-</div><div id="l1080" class="code_block">        <span class="k">if</span> <span class="n">this_form</span><span class="o">!=</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1081" class="code_block">            <span class="k">for</span> <span class="n">control</span> <span class="ow">in</span> <span class="n">this_form</span><span class="p">:</span>
-</div><div id="l1082" class="code_block">                <span class="k">if</span> <span class="n">control</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span> <span class="k">break</span>        <span class="c1">#some browser bug</span>
-</div><div id="l1083" class="code_block">                <span class="k">if</span> <span class="n">control</span><span class="o">.</span><span class="n">type</span> <span class="o">!=</span> <span class="s1">&#39;hidden&#39;</span><span class="p">:</span>
-</div><div id="l1084" class="code_block">                    <span class="k">if</span> <span class="n">control</span><span class="o">.</span><span class="n">id</span> <span class="o">==</span> <span class="bp">None</span> <span class="ow">or</span> <span class="n">control</span><span class="o">.</span><span class="n">id</span> <span class="o">==</span> <span class="s1">&#39;&#39;</span><span class="p">:</span>
-</div><div id="l1085" class="code_block">                        <span class="n">d</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">control</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l1086" class="code_block">                    <span class="k">else</span><span class="p">:</span>
-</div><div id="l1087" class="code_block">                        <span class="n">d</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">control</span><span class="o">.</span><span class="n">id</span><span class="p">)</span>
-</div><div id="l1088" class="code_block">        <span class="k">return</span> <span class="n">d</span>
-</div><div id="l1089" class="code_block">    
-</div><div id="l1090" class="code_block">
-</div><div id="l1091" class="code_block">    <span class="k">def</span> <span class="nf">get_forms</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">frm_filter</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l1092" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a list of forms</span>
-</div><div id="l1093" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1094" class="code_block"><span class="sd">                [frm_filter]    - Get only buttons specified by the filter</span>
-</div><div id="l1095" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1096" class="code_block"><span class="sd">                A list of forms</span>
-</div><div id="l1097" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1098" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="s2">&quot;form&quot;</span><span class="p">,</span> <span class="n">frm_filter</span><span class="p">)</span>
-</div><div id="l1099" class="code_block">
-</div><div id="l1100" class="code_block">    <span class="k">def</span> <span class="nf">get_Forms_Value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">attribute</span><span class="p">,</span> <span class="n">frm_filter</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l1101" class="code_block">        <span class="sd">&quot;&quot;&quot; Use this to get the form object names on the page</span>
-</div><div id="l1102" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1103" class="code_block"><span class="sd">                attribute   - The name of the attribute to get the value for</span>
-</div><div id="l1104" class="code_block"><span class="sd">                [frm_filter]    - Get only forms specified by the filter</span>
-</div><div id="l1105" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1106" class="code_block"><span class="sd">                a list of form names</span>
-</div><div id="l1107" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1108" class="code_block">        <span class="n">my_values</span><span class="o">=</span><span class="p">[]</span>
-</div><div id="l1109" class="code_block">        <span class="n">my_forms</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">getForms</span><span class="p">(</span><span class="n">frm_filter</span><span class="p">)</span>
-</div><div id="l1110" class="code_block">        <span class="k">for</span> <span class="n">form</span> <span class="ow">in</span> <span class="n">my_forms</span><span class="p">[:]:</span>
-</div><div id="l1111" class="code_block">            <span class="n">my_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">form</span><span class="o">.</span><span class="n">getAttribute</span><span class="p">(</span><span class="n">attribute</span><span class="p">))</span>
-</div><div id="l1112" class="code_block">        <span class="k">return</span> <span class="n">my_values</span>
-</div><div id="l1113" class="code_block">        
-</div><div id="l1114" class="code_block">        
-</div><div id="l1115" class="code_block">    <span class="k">def</span> <span class="nf">get_frame</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l1116" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a a frame</span>
-</div><div id="l1117" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1118" class="code_block"><span class="sd">                name  - The name or index of the frame</span>
-</div><div id="l1119" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1120" class="code_block"><span class="sd">                a frame element</span>
-</div><div id="l1121" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1122" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span>
-</div><div id="l1123" class="code_block">        <span class="n">frames</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">frames</span>
-</div><div id="l1124" class="code_block">        <span class="n">dest_frames</span> <span class="o">=</span> <span class="n">name</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)</span>
-</div><div id="l1125" class="code_block">        
-</div><div id="l1126" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l1127" class="code_block">            <span class="k">return</span> <span class="n">frames</span><span class="p">[</span><span class="n">name</span><span class="p">]</span>
-</div><div id="l1128" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1129" class="code_block">            <span class="n">j</span> <span class="o">=</span> <span class="mi">0</span>
-</div><div id="l1130" class="code_block">            <span class="k">for</span> <span class="n">dest_frame</span> <span class="ow">in</span> <span class="n">dest_frames</span><span class="p">:</span>
-</div><div id="l1131" class="code_block">                <span class="n">j</span> <span class="o">+=</span> <span class="mi">1</span>
-</div><div id="l1132" class="code_block">                <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">frames</span><span class="o">.</span><span class="n">length</span><span class="p">):</span>
-</div><div id="l1133" class="code_block">                    <span class="n">fName</span> <span class="o">=</span> <span class="n">frames</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">name</span>
-</div><div id="l1134" class="code_block">                    <span class="k">if</span> <span class="n">fName</span> <span class="o">==</span> <span class="n">dest_frame</span><span class="p">:</span>
-</div><div id="l1135" class="code_block">                        <span class="k">if</span> <span class="n">j</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">dest_frames</span><span class="p">):</span>
-</div><div id="l1136" class="code_block">                            <span class="n">my_frame</span> <span class="o">=</span> <span class="n">frames</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
-</div><div id="l1137" class="code_block">                            <span class="bp">self</span><span class="o">.</span><span class="n">_frame_wait</span><span class="p">(</span><span class="n">my_frame</span><span class="p">)</span>
-</div><div id="l1138" class="code_block">                            <span class="k">return</span> <span class="n">my_frame</span>
-</div><div id="l1139" class="code_block">                        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1140" class="code_block">                            <span class="n">frames</span> <span class="o">=</span> <span class="n">frames</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">document</span><span class="o">.</span><span class="n">frames</span>
-</div><div id="l1141" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1142" class="code_block">
-</div><div id="l1143" class="code_block">    <span class="k">def</span> <span class="nf">get_frame_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">attribute</span><span class="p">):</span>
-</div><div id="l1144" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the value of an attribute on a frame</span>
-</div><div id="l1145" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1146" class="code_block"><span class="sd">                name        - The name of the frame</span>
-</div><div id="l1147" class="code_block"><span class="sd">                attribute   - The name of the attribute to get the value for</span>
-</div><div id="l1148" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1149" class="code_block"><span class="sd">                The value of the attribute</span>
-</div><div id="l1150" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1151" class="code_block">        <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_frame</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l1152" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1153" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getFrameValue() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1154" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1155" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1156" class="code_block">            <span class="k">return</span> <span class="n">found_element</span><span class="o">.</span><span class="n">name</span> <span class="c1"># can&#39;t call getElementValue() here</span>
-</div><div id="l1157" class="code_block">
-</div><div id="l1158" class="code_block">    <span class="k">def</span> <span class="nf">get_frames_value</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</div><div id="l1159" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the value of an attribute on a frame</span>
-</div><div id="l1160" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1161" class="code_block"><span class="sd">                none</span>
-</div><div id="l1162" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1163" class="code_block"><span class="sd">                The list of frame values</span>
-</div><div id="l1164" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1165" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span>
-</div><div id="l1166" class="code_block">        <span class="n">l</span><span class="o">=</span><span class="p">[]</span>
-</div><div id="l1167" class="code_block">        <span class="n">frames</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">frames</span>
-</div><div id="l1168" class="code_block">        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">frames</span><span class="o">.</span><span class="n">length</span><span class="p">):</span>
-</div><div id="l1169" class="code_block">            <span class="n">l</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">frames</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>    <span class="c1"># can&#39;t call getAttribute() here</span>
-</div><div id="l1170" class="code_block">        <span class="k">return</span> <span class="n">l</span>
-</div><div id="l1171" class="code_block">        
-</div><div id="l1172" class="code_block">      
-</div><div id="l1173" class="code_block">    
-</div><div id="l1174" class="code_block">    <span class="k">def</span> <span class="nf">get_ie</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</div><div id="l1175" class="code_block">        <span class="sd">&quot;&quot;&quot; Get the current IE Application</span>
-</div><div id="l1176" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1177" class="code_block"><span class="sd">                None</span>
-</div><div id="l1178" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1179" class="code_block"><span class="sd">                The current IE document</span>
-</div><div id="l1180" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1181" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span>
-</div><div id="l1182" class="code_block">
-</div><div id="l1183" class="code_block">    <span class="k">def</span> <span class="nf">get_image</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l1184" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets an image</span>
-</div><div id="l1185" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1186" class="code_block"><span class="sd">                name  - The id, name, src or index of the image</span>
-</div><div id="l1187" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1188" class="code_block"><span class="sd">                an image</span>
-</div><div id="l1189" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1190" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l1191" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element_by_index</span><span class="p">(</span><span class="s2">&quot;img&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1192" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1193" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="s2">&quot;img&quot;</span><span class="p">,</span> <span class="s2">&quot;id;name;nameProp;src&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1194" class="code_block">                
-</div><div id="l1195" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1196" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getImage() did not find &quot;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">name</span><span class="p">))</span>
-</div><div id="l1197" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1198" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1199" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l1200" class="code_block">            <span class="k">return</span> <span class="n">found_element</span>
-</div><div id="l1201" class="code_block">
-</div><div id="l1202" class="code_block">    <span class="k">def</span> <span class="nf">get_image_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">attribute</span><span class="p">):</span>
-</div><div id="l1203" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the value of an attribute on a image</span>
-</div><div id="l1204" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1205" class="code_block"><span class="sd">                name        - The id, name, value or index of the image, or image element.</span>
-</div><div id="l1206" class="code_block"><span class="sd">                attribute   - The name of the attribute to get the value for</span>
-</div><div id="l1207" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1208" class="code_block"><span class="sd">                The value of the attribute</span>
-</div><div id="l1209" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1210" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l1211" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_image</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l1212" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1213" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l1214" class="code_block">
-</div><div id="l1215" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1216" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getImageValue() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1217" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1218" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1219" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l1220" class="code_block">            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_element_value</span><span class="p">(</span><span class="n">found_element</span><span class="p">,</span> <span class="n">attribute</span><span class="p">)</span>
-</div><div id="l1221" class="code_block">
-</div><div id="l1222" class="code_block">    <span class="k">def</span> <span class="nf">get_images</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">imgfilter</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l1223" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a list of images</span>
-</div><div id="l1224" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1225" class="code_block"><span class="sd">                [imgfilter]    - Get only buttons specified by the imgfilter</span>
-</div><div id="l1226" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1227" class="code_block"><span class="sd">                A list of images</span>
-</div><div id="l1228" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1229" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="s2">&quot;img&quot;</span><span class="p">,</span> <span class="n">imgfilter</span><span class="p">)</span>
-</div><div id="l1230" class="code_block">
-</div><div id="l1231" class="code_block">
-</div><div id="l1232" class="code_block">    <span class="k">def</span> <span class="nf">get_images_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">attribute</span><span class="p">,</span> <span class="n">imgfilter</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l1233" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a list of the specified value for the images</span>
-</div><div id="l1234" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1235" class="code_block"><span class="sd">                attribute   - The name of the attribute to get the value for</span>
-</div><div id="l1236" class="code_block"><span class="sd">                [imgfilter]    - Get only images specified by the imgfilter</span>
-</div><div id="l1237" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1238" class="code_block"><span class="sd">                A list of image values.</span>
-</div><div id="l1239" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1240" class="code_block">        <span class="n">my_values</span><span class="o">=</span><span class="p">[]</span>
-</div><div id="l1241" class="code_block">        <span class="n">my_images</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_images</span><span class="p">(</span><span class="n">imgfilter</span><span class="p">)</span>
-</div><div id="l1242" class="code_block">        <span class="k">for</span> <span class="n">image</span> <span class="ow">in</span> <span class="n">my_images</span><span class="p">[:]:</span>
-</div><div id="l1243" class="code_block">            <span class="n">my_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">image</span><span class="o">.</span><span class="n">getAttribute</span><span class="p">(</span><span class="n">attribute</span><span class="p">))</span>
-</div><div id="l1244" class="code_block">        <span class="k">return</span> <span class="n">my_values</span>
-</div><div id="l1245" class="code_block">
-</div><div id="l1246" class="code_block">    <span class="k">def</span> <span class="nf">get_input_elements</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">infilter</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l1247" class="code_block">        <span class="sd">&quot;&quot;&quot; Get all the input elements</span>
-</div><div id="l1248" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1249" class="code_block"><span class="sd">                [filter]    - Get only buttons specified by the filter</span>
-</div><div id="l1250" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1251" class="code_block"><span class="sd">                A list of input elements</span>
-</div><div id="l1252" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1253" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="n">infilter</span><span class="p">)</span>
-</div><div id="l1254" class="code_block">
-</div><div id="l1255" class="code_block">      
-</div><div id="l1256" class="code_block">    <span class="k">def</span> <span class="nf">get_link</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l1257" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a link</span>
-</div><div id="l1258" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1259" class="code_block"><span class="sd">                name  - The id, innerText or index of the link</span>
-</div><div id="l1260" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1261" class="code_block"><span class="sd">                an image</span>
-</div><div id="l1262" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1263" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l1264" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element_by_index</span><span class="p">(</span><span class="s2">&quot;a&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1265" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1266" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="s2">&quot;a&quot;</span><span class="p">,</span> <span class="s2">&quot;id;innerText&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1267" class="code_block">        
-</div><div id="l1268" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1269" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getLink() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1270" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1271" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1272" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l1273" class="code_block">            <span class="k">return</span> <span class="n">found_element</span>
-</div><div id="l1274" class="code_block">        
-</div><div id="l1275" class="code_block">
-</div><div id="l1276" class="code_block">    <span class="k">def</span> <span class="nf">get_link_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">attribute</span><span class="p">):</span>
-</div><div id="l1277" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the value of an attribute on a link</span>
-</div><div id="l1278" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1279" class="code_block"><span class="sd">                name        - The id, innerText or index of the link, or a link element.</span>
-</div><div id="l1280" class="code_block"><span class="sd">                attribute   - The name of the attribute to get the value for</span>
-</div><div id="l1281" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1282" class="code_block"><span class="sd">                The value of the attribute</span>
-</div><div id="l1283" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1284" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l1285" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">getLink</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l1286" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1287" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l1288" class="code_block">
-</div><div id="l1289" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1290" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getLinkValue() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1291" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1292" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1293" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l1294" class="code_block">            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">getElementValue</span><span class="p">(</span><span class="n">found_element</span><span class="p">,</span> <span class="n">attribute</span><span class="p">)</span>
-</div><div id="l1295" class="code_block">
-</div><div id="l1296" class="code_block">    <span class="k">def</span> <span class="nf">get_links</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">lnk_filter</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l1297" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a list of links</span>
-</div><div id="l1298" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1299" class="code_block"><span class="sd">                [filter]    - Get only links specified by the filter</span>
-</div><div id="l1300" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1301" class="code_block"><span class="sd">                A list of links</span>
-</div><div id="l1302" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1303" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="s2">&quot;a&quot;</span><span class="p">,</span> <span class="n">lnk_filter</span><span class="p">)</span>
-</div><div id="l1304" class="code_block">    
-</div><div id="l1305" class="code_block">    <span class="k">def</span> <span class="nf">get_links_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">attribute</span><span class="p">,</span> <span class="n">lnk_filter</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l1306" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a list of the specified value for the links</span>
-</div><div id="l1307" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1308" class="code_block"><span class="sd">                attribute   - The name of the attribute to get the value for</span>
-</div><div id="l1309" class="code_block"><span class="sd">                [filter]    - Get only links specified by the filter</span>
-</div><div id="l1310" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1311" class="code_block"><span class="sd">                A list of link values.</span>
-</div><div id="l1312" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1313" class="code_block">        <span class="n">my_values</span><span class="o">=</span><span class="p">[]</span>
-</div><div id="l1314" class="code_block">        <span class="n">myLinks</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">getLinks</span><span class="p">(</span><span class="nb">filter</span><span class="p">)</span>
-</div><div id="l1315" class="code_block">        <span class="k">for</span> <span class="n">link</span> <span class="ow">in</span> <span class="n">myLinks</span><span class="p">[:]:</span>
-</div><div id="l1316" class="code_block">            <span class="n">my_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">link</span><span class="o">.</span><span class="n">getAttribute</span><span class="p">(</span><span class="n">attribute</span><span class="p">))</span>
-</div><div id="l1317" class="code_block">        <span class="k">return</span> <span class="n">my_values</span>
-</div><div id="l1318" class="code_block">    
-</div><div id="l1319" class="code_block">      
-</div><div id="l1320" class="code_block">    <span class="k">def</span> <span class="nf">get_listbox</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l1321" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a list box.</span>
-</div><div id="l1322" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1323" class="code_block"><span class="sd">                name    - The name or index of the listbox</span>
-</div><div id="l1324" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1325" class="code_block"><span class="sd">                A list box</span>
-</div><div id="l1326" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1327" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l1328" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element_by_index</span><span class="p">(</span><span class="s2">&quot;select&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1329" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1330" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="s2">&quot;select&quot;</span><span class="p">,</span> <span class="s2">&quot;name;id&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1331" class="code_block">
-</div><div id="l1332" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1333" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getListBox() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1334" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1335" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1336" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l1337" class="code_block">            <span class="k">return</span> <span class="n">found_element</span>
-</div><div id="l1338" class="code_block">
-</div><div id="l1339" class="code_block">    <span class="k">def</span> <span class="nf">get_listbox_item_count</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span><span class="n">name</span><span class="p">):</span>
-</div><div id="l1340" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a count of selected options associated with a listbox.</span>
-</div><div id="l1341" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1342" class="code_block"><span class="sd">                The name or id of the list box</span>
-</div><div id="l1343" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1344" class="code_block"><span class="sd">                The selected text</span>
-</div><div id="l1345" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1346" class="code_block">        <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="s2">&quot;select&quot;</span><span class="p">,</span> <span class="s2">&quot;name;id&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1347" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1348" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getListBoxSelected() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1349" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1350" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1351" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l1352" class="code_block">            <span class="n">my_values</span> <span class="o">=</span> <span class="p">[]</span>
-</div><div id="l1353" class="code_block">            
-</div><div id="l1354" class="code_block">            <span class="n">my_elements</span> <span class="o">=</span> <span class="n">found_element</span><span class="o">.</span><span class="n">options</span>
-</div><div id="l1355" class="code_block">            <span class="n">count</span> <span class="o">=</span> <span class="mi">0</span>
-</div><div id="l1356" class="code_block">            <span class="k">while</span> <span class="n">count</span> <span class="o">&lt;</span> <span class="n">my_elements</span><span class="o">.</span><span class="n">length</span><span class="p">:</span>
-</div><div id="l1357" class="code_block">                <span class="n">count</span> <span class="o">+=</span> <span class="mi">1</span>
-</div><div id="l1358" class="code_block">            <span class="k">return</span> <span class="n">my_values</span>         
-</div><div id="l1359" class="code_block">
-</div><div id="l1360" class="code_block">    <span class="k">def</span> <span class="nf">get_listbox_options</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l1361" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the list of options associated with a listbox.</span>
-</div><div id="l1362" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1363" class="code_block"><span class="sd">                The name or id of the list box</span>
-</div><div id="l1364" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1365" class="code_block"><span class="sd">                A list of options</span>
-</div><div id="l1366" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1367" class="code_block">        <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="s2">&quot;select&quot;</span><span class="p">,</span> <span class="s2">&quot;name;id&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1368" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1369" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getListBoxOptions() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1370" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1371" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1372" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l1373" class="code_block">            <span class="n">my_values</span> <span class="o">=</span> <span class="p">[]</span>
-</div><div id="l1374" class="code_block">            <span class="n">count</span> <span class="o">=</span> <span class="mi">0</span>
-</div><div id="l1375" class="code_block">            <span class="n">my_elements</span> <span class="o">=</span> <span class="n">found_element</span><span class="o">.</span><span class="n">options</span>
-</div><div id="l1376" class="code_block">            <span class="k">while</span> <span class="n">count</span> <span class="o">&lt;</span> <span class="n">my_elements</span><span class="o">.</span><span class="n">length</span><span class="p">:</span>
-</div><div id="l1377" class="code_block">                <span class="n">my_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">my_elements</span><span class="p">[</span><span class="n">count</span><span class="p">]</span><span class="o">.</span><span class="n">innerText</span><span class="p">)</span>
-</div><div id="l1378" class="code_block">                <span class="n">count</span> <span class="o">+=</span> <span class="mi">1</span>
-</div><div id="l1379" class="code_block">            <span class="k">return</span> <span class="n">my_values</span>
-</div><div id="l1380" class="code_block">
-</div><div id="l1381" class="code_block">    <span class="k">def</span> <span class="nf">get_listbox_selected</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l1382" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the list of selected options associated with a listbox.</span>
-</div><div id="l1383" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1384" class="code_block"><span class="sd">                The name or id of the list box</span>
-</div><div id="l1385" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1386" class="code_block"><span class="sd">                The selected text</span>
-</div><div id="l1387" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1388" class="code_block">        <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="s2">&quot;select&quot;</span><span class="p">,</span> <span class="s2">&quot;name;id&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1389" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1390" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getListBoxSelected() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1391" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1392" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1393" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l1394" class="code_block">            <span class="n">my_values</span> <span class="o">=</span> <span class="p">[]</span>
-</div><div id="l1395" class="code_block">            
-</div><div id="l1396" class="code_block">            <span class="n">my_elements</span> <span class="o">=</span> <span class="n">found_element</span><span class="o">.</span><span class="n">options</span>
-</div><div id="l1397" class="code_block">            <span class="n">count</span> <span class="o">=</span> <span class="mi">0</span>
-</div><div id="l1398" class="code_block">            <span class="k">while</span> <span class="n">count</span> <span class="o">&lt;</span> <span class="n">my_elements</span><span class="o">.</span><span class="n">length</span><span class="p">:</span>
-</div><div id="l1399" class="code_block">                <span class="k">if</span> <span class="n">my_elements</span><span class="p">[</span><span class="n">count</span><span class="p">]</span><span class="o">.</span><span class="n">selected</span><span class="p">:</span>               
-</div><div id="l1400" class="code_block">                    <span class="n">my_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">my_elements</span><span class="p">[</span><span class="n">count</span><span class="p">]</span><span class="o">.</span><span class="n">innerText</span><span class="p">)</span>
-</div><div id="l1401" class="code_block">                <span class="n">count</span> <span class="o">+=</span> <span class="mi">1</span>
-</div><div id="l1402" class="code_block">            <span class="k">return</span> <span class="n">my_values</span>
-</div><div id="l1403" class="code_block">
-</div><div id="l1404" class="code_block">    <span class="k">def</span> <span class="nf">get_listbox_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">attribute</span><span class="p">):</span>
-</div><div id="l1405" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the value of an attribute on a listbox</span>
-</div><div id="l1406" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1407" class="code_block"><span class="sd">                name        - The id, innerText or index of the listbox, or a listbox element.</span>
-</div><div id="l1408" class="code_block"><span class="sd">                attribute   - The name of the attribute to get the value for</span>
-</div><div id="l1409" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1410" class="code_block"><span class="sd">                The value of the attribute</span>
-</div><div id="l1411" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1412" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l1413" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">getListBox</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l1414" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1415" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l1416" class="code_block">
-</div><div id="l1417" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1418" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getListBoxValue() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1419" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1420" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1421" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l1422" class="code_block">            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">getElementValue</span><span class="p">(</span><span class="n">found_element</span><span class="p">,</span> <span class="n">attribute</span><span class="p">)</span>
-</div><div id="l1423" class="code_block">        
-</div><div id="l1424" class="code_block">
-</div><div id="l1425" class="code_block">    <span class="k">def</span> <span class="nf">get_page_text</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</div><div id="l1426" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the URL, Title and outerHTML</span>
-</div><div id="l1427" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1428" class="code_block"><span class="sd">                None</span>
-</div><div id="l1429" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1430" class="code_block"><span class="sd">                a string consisting of:</span>
-</div><div id="l1431" class="code_block"><span class="sd">                URL,</span>
-</div><div id="l1432" class="code_block"><span class="sd">                Title</span>
-</div><div id="l1433" class="code_block"><span class="sd">                Body block</span>
-</div><div id="l1434" class="code_block"><span class="sd">            as a string. Unfortunately, IE doesn&#39;t give a workable solution to </span>
-</div><div id="l1435" class="code_block"><span class="sd">            saving the complete source so this is as good as it gets until</span>
-</div><div id="l1436" class="code_block"><span class="sd">            someone brighter comes along.  This is useful if you want to compare</span>
-</div><div id="l1437" class="code_block"><span class="sd">            against a previous run for QCing purposes.</span>
-</div><div id="l1438" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1439" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span> 
-</div><div id="l1440" class="code_block">        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame_name</span><span class="p">:</span>
-</div><div id="l1441" class="code_block">            <span class="k">return</span> <span class="s1">&#39;</span><span class="si">%s</span><span class="se">\n</span><span class="si">%s</span><span class="se">\n</span><span class="si">%s</span><span class="s1">&#39;</span><span class="o">%</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">LocationURL</span><span class="p">,</span>
-</div><div id="l1442" class="code_block">                                 <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">LocationName</span><span class="p">,</span>
-</div><div id="l1443" class="code_block">                                 <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">frames</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">frame_name</span><span class="p">]</span><span class="o">.</span><span class="n">document</span><span class="o">.</span><span class="n">body</span><span class="o">.</span><span class="n">outerHTML</span><span class="p">)</span>
-</div><div id="l1444" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1445" class="code_block">            <span class="k">return</span> <span class="s1">&#39;</span><span class="si">%s</span><span class="se">\n</span><span class="si">%s</span><span class="se">\n</span><span class="si">%s</span><span class="s1">&#39;</span><span class="o">%</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">LocationURL</span><span class="p">,</span>
-</div><div id="l1446" class="code_block">                                 <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">LocationName</span><span class="p">,</span>
-</div><div id="l1447" class="code_block">                                 <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">body</span><span class="o">.</span><span class="n">outerHTML</span><span class="p">)</span>        
-</div><div id="l1448" class="code_block">
-</div><div id="l1449" class="code_block">                            
-</div><div id="l1450" class="code_block">    <span class="k">def</span> <span class="nf">get_radio_button</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l1451" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a radio button by the name.  If there are multiple radio buttons</span>
-</div><div id="l1452" class="code_block"><span class="sd">            with the same name, the first one found is returned.</span>
-</div><div id="l1453" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1454" class="code_block"><span class="sd">                name - radio button group name or index</span>
-</div><div id="l1455" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1456" class="code_block"><span class="sd">                a list values for the group</span>
-</div><div id="l1457" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1458" class="code_block">        <span class="n">my_elements</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;type=radio&quot;</span><span class="p">)</span>
-</div><div id="l1459" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l1460" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element_by_index</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="bp">None</span><span class="p">,</span> <span class="n">my_elements</span><span class="p">)</span>
-</div><div id="l1461" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1462" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">my_elements</span><span class="p">)</span>
-</div><div id="l1463" class="code_block">
-</div><div id="l1464" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1465" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getRadioButton() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1466" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1467" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1468" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l1469" class="code_block">            <span class="k">return</span> <span class="n">found_element</span>
-</div><div id="l1470" class="code_block">  
-</div><div id="l1471" class="code_block">    <span class="k">def</span> <span class="nf">get_radio_button_selected</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l1472" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a list of selected radio button values for a Radio Button group</span>
-</div><div id="l1473" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1474" class="code_block"><span class="sd">                name - radio button group name</span>
-</div><div id="l1475" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1476" class="code_block"><span class="sd">                a list of selected buttons from the group</span>
-</div><div id="l1477" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1478" class="code_block">        <span class="n">my_values</span> <span class="o">=</span> <span class="p">[]</span>
-</div><div id="l1479" class="code_block">        <span class="n">my_elements</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;type=radio;checked=True;name=&quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1480" class="code_block">        <span class="k">for</span> <span class="n">el</span> <span class="ow">in</span> <span class="n">my_elements</span><span class="p">[:]:</span>
-</div><div id="l1481" class="code_block">            <span class="n">my_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">el</span><span class="o">.</span><span class="n">value</span><span class="p">)</span>
-</div><div id="l1482" class="code_block">        <span class="k">return</span> <span class="n">my_values</span>
-</div><div id="l1483" class="code_block">    
-</div><div id="l1484" class="code_block">    <span class="k">def</span> <span class="nf">get_radio_button_values</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l1485" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a list of selected radio button values for a Radio Button group</span>
-</div><div id="l1486" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1487" class="code_block"><span class="sd">                name - radio button group name</span>
-</div><div id="l1488" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1489" class="code_block"><span class="sd">                a list of selected buttons from the group</span>
-</div><div id="l1490" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1491" class="code_block">        <span class="n">my_values</span> <span class="o">=</span> <span class="p">[]</span>
-</div><div id="l1492" class="code_block">        <span class="n">my_elements</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;type=radio;checked=False;name=&quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1493" class="code_block">        <span class="k">for</span> <span class="n">el</span> <span class="ow">in</span> <span class="n">my_elements</span><span class="p">[:]:</span>
-</div><div id="l1494" class="code_block">            <span class="n">my_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">el</span><span class="o">.</span><span class="n">value</span><span class="p">)</span>
-</div><div id="l1495" class="code_block">        <span class="k">return</span> <span class="n">my_values</span>
-</div><div id="l1496" class="code_block">
-</div><div id="l1497" class="code_block">
-</div><div id="l1498" class="code_block">    <span class="k">def</span> <span class="nf">get_radio_buttons</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">filter</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l1499" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets all the radio buttons</span>
-</div><div id="l1500" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1501" class="code_block"><span class="sd">                [filter]    - Get only radio buttons specified by the filter</span>
-</div><div id="l1502" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1503" class="code_block"><span class="sd">                A list of checkboxes</span>
-</div><div id="l1504" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1505" class="code_block">        <span class="k">if</span> <span class="nb">filter</span><span class="p">:</span>
-</div><div id="l1506" class="code_block">            <span class="nb">filter</span> <span class="o">=</span> <span class="s2">&quot;type=radio;&quot;</span> <span class="o">+</span> <span class="nb">filter</span>
-</div><div id="l1507" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1508" class="code_block">            <span class="nb">filter</span> <span class="o">=</span> <span class="s2">&quot;type=radio&quot;</span>
-</div><div id="l1509" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="nb">filter</span><span class="p">)</span>
-</div><div id="l1510" class="code_block">
-</div><div id="l1511" class="code_block">    <span class="k">def</span> <span class="nf">get_table</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l1512" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a table</span>
-</div><div id="l1513" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1514" class="code_block"><span class="sd">                name  - The id or name of the table</span>
-</div><div id="l1515" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1516" class="code_block"><span class="sd">                a table</span>
-</div><div id="l1517" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1518" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l1519" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element_by_index</span> <span class="p">(</span><span class="s2">&quot;table&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1520" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1521" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="s2">&quot;table&quot;</span><span class="p">,</span> <span class="s2">&quot;id;name&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1522" class="code_block">
-</div><div id="l1523" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1524" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">showDebugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getTable() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1525" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1526" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1527" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l1528" class="code_block">            <span class="k">return</span> <span class="n">found_element</span>
-</div><div id="l1529" class="code_block">        
-</div><div id="l1530" class="code_block">    <span class="k">def</span> <span class="nf">get_table_data</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l1531" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the data from a table</span>
-</div><div id="l1532" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1533" class="code_block"><span class="sd">                name  - The id, name or index of the table, or a table element.</span>
-</div><div id="l1534" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1535" class="code_block"><span class="sd">                a string containing all the table data</span>
-</div><div id="l1536" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1537" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l1538" class="code_block">            <span class="n">my_table</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">getTable</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l1539" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1540" class="code_block">            <span class="n">my_table</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l1541" class="code_block">
-</div><div id="l1542" class="code_block">        <span class="n">my_cells</span> <span class="o">=</span> <span class="n">my_table</span><span class="o">.</span><span class="n">cells</span>
-</div><div id="l1543" class="code_block">
-</div><div id="l1544" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l1545" class="code_block">            <span class="n">my_data</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
-</div><div id="l1546" class="code_block">            <span class="n">lastIndex</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span>
-</div><div id="l1547" class="code_block">            <span class="k">for</span> <span class="n">myCell</span> <span class="ow">in</span> <span class="n">my_cells</span><span class="p">:</span>
-</div><div id="l1548" class="code_block">                <span class="k">if</span> <span class="n">myCell</span><span class="o">.</span><span class="n">cellIndex</span> <span class="o">&lt;=</span> <span class="n">lastIndex</span><span class="p">:</span> <span class="n">my_data</span> <span class="o">+=</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span>
-</div><div id="l1549" class="code_block">                <span class="n">my_data</span> <span class="o">+=</span> <span class="nb">str</span><span class="p">(</span><span class="n">myCell</span><span class="o">.</span><span class="n">innerText</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span> <span class="o">+</span> <span class="s2">&quot; &quot;</span>
-</div><div id="l1550" class="code_block">                <span class="n">lastIndex</span> <span class="o">=</span> <span class="n">myCell</span><span class="o">.</span><span class="n">cellIndex</span>
-</div><div id="l1551" class="code_block">            <span class="k">return</span> <span class="n">my_data</span>
-</div><div id="l1552" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l1553" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l1554" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l1555" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l1556" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1557" class="code_block">        <span class="k">else</span><span class="p">:</span>   <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1558" class="code_block">
-</div><div id="l1559" class="code_block">    <span class="k">def</span> <span class="nf">get_table_row_index</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">row</span><span class="p">):</span>
-</div><div id="l1560" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the index of a row in a table.</span>
-</div><div id="l1561" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1562" class="code_block"><span class="sd">                Name        - The id, name or index of the table</span>
-</div><div id="l1563" class="code_block"><span class="sd">                row[]       - The row to search for. Use * to ignore cell.</span>
-</div><div id="l1564" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1565" class="code_block"><span class="sd">                index of the row if found</span>
-</div><div id="l1566" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1567" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l1568" class="code_block">            <span class="n">my_table</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">getTable</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l1569" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1570" class="code_block">            <span class="n">my_table</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l1571" class="code_block">        <span class="n">myCells</span> <span class="o">=</span> <span class="n">my_table</span><span class="o">.</span><span class="n">cells</span>
-</div><div id="l1572" class="code_block">
-</div><div id="l1573" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l1574" class="code_block">            <span class="n">myData</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
-</div><div id="l1575" class="code_block">            <span class="n">colIndex</span> <span class="o">=</span> <span class="mi">0</span>
-</div><div id="l1576" class="code_block">            <span class="n">cIndex</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span>
-</div><div id="l1577" class="code_block">            <span class="n">matches</span> <span class="o">=</span> <span class="bp">True</span>
-</div><div id="l1578" class="code_block">            <span class="n">rowIndex</span> <span class="o">=</span> <span class="mi">0</span>
-</div><div id="l1579" class="code_block">            
-</div><div id="l1580" class="code_block">            <span class="k">for</span> <span class="n">myCell</span> <span class="ow">in</span> <span class="n">myCells</span><span class="p">:</span>
-</div><div id="l1581" class="code_block">                <span class="k">if</span> <span class="n">myCell</span><span class="o">.</span><span class="n">cellIndex</span> <span class="o">&lt;=</span> <span class="n">cIndex</span><span class="p">:</span>
-</div><div id="l1582" class="code_block">                    <span class="k">if</span> <span class="n">matches</span> <span class="o">==</span> <span class="bp">True</span><span class="p">:</span>
-</div><div id="l1583" class="code_block">                        <span class="k">return</span> <span class="n">rowIndex</span>
-</div><div id="l1584" class="code_block">                    <span class="k">else</span><span class="p">:</span>
-</div><div id="l1585" class="code_block">                        <span class="n">matches</span> <span class="o">=</span> <span class="bp">True</span>
-</div><div id="l1586" class="code_block">                        <span class="n">rowIndex</span> <span class="o">+=</span> <span class="mi">1</span>
-</div><div id="l1587" class="code_block">                    <span class="n">colIndex</span> <span class="o">=</span> <span class="mi">0</span>
-</div><div id="l1588" class="code_block">                    
-</div><div id="l1589" class="code_block">                <span class="k">if</span> <span class="n">row</span><span class="p">[</span><span class="n">colIndex</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;*&quot;</span><span class="p">:</span>
-</div><div id="l1590" class="code_block">                    <span class="n">foundVal</span> <span class="o">=</span> <span class="n">myCell</span><span class="o">.</span><span class="n">innerText</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
-</div><div id="l1591" class="code_block">                    <span class="k">if</span> <span class="n">foundVal</span> <span class="o">!=</span> <span class="n">row</span><span class="p">[</span><span class="n">colIndex</span><span class="p">]:</span>
-</div><div id="l1592" class="code_block">                        <span class="n">matches</span> <span class="o">=</span> <span class="bp">False</span>
-</div><div id="l1593" class="code_block">
-</div><div id="l1594" class="code_block">                <span class="n">cIndex</span> <span class="o">=</span> <span class="n">myCell</span><span class="o">.</span><span class="n">cellIndex</span>
-</div><div id="l1595" class="code_block">                <span class="n">colIndex</span> <span class="o">+=</span> <span class="mi">1</span>
-</div><div id="l1596" class="code_block">            <span class="k">return</span> <span class="n">matches</span>
-</div><div id="l1597" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l1598" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l1599" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l1600" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l1601" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1602" class="code_block">        <span class="k">else</span><span class="p">:</span>   <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1603" class="code_block">        
-</div><div id="l1604" class="code_block">        
-</div><div id="l1605" class="code_block">    <span class="k">def</span> <span class="nf">get_table_text</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span><span class="n">table_name</span><span class="p">,</span><span class="n">row_num</span><span class="p">,</span><span class="n">cell_num</span><span class="p">,</span> <span class="n">frame_name</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l1606" class="code_block">        <span class="sd">&quot;&quot;&quot; getTableData - returns data from a cell in a table</span>
-</div><div id="l1607" class="code_block"><span class="sd">            parms:</span>
-</div><div id="l1608" class="code_block"><span class="sd">                table_name - name of table</span>
-</div><div id="l1609" class="code_block"><span class="sd">                row_num - row number</span>
-</div><div id="l1610" class="code_block"><span class="sd">                cell_num - cell number       </span>
-</div><div id="l1611" class="code_block"><span class="sd">        </span>
-</div><div id="l1612" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1613" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span> 
-</div><div id="l1614" class="code_block">        <span class="n">table</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">getElementsByTagName</span><span class="p">(</span><span class="s1">&#39;table&#39;</span><span class="p">)</span>
-</div><div id="l1615" class="code_block">        
-</div><div id="l1616" class="code_block">        
-</div><div id="l1617" class="code_block">        <span class="k">if</span> <span class="n">table</span><span class="o">.</span><span class="n">length</span> <span class="o">&gt;</span><span class="mi">0</span><span class="p">:</span>    
-</div><div id="l1618" class="code_block">            
-</div><div id="l1619" class="code_block">            <span class="n">table</span><span class="p">[</span><span class="n">table_name</span><span class="p">]</span><span class="o">.</span><span class="n">rows</span><span class="p">[</span><span class="n">row_num</span><span class="p">]</span><span class="o">.</span><span class="n">cells</span><span class="p">[</span><span class="n">cell_num</span><span class="p">]</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span> <span class="s1">&#39;cyan&#39;</span>
-</div><div id="l1620" class="code_block">            <span class="n">data</span> <span class="o">=</span> <span class="n">table</span><span class="p">[</span><span class="n">table_name</span><span class="p">]</span><span class="o">.</span><span class="n">rows</span><span class="p">[</span><span class="n">row_num</span><span class="p">]</span><span class="o">.</span><span class="n">cells</span><span class="p">[</span><span class="n">cell_num</span><span class="p">]</span><span class="o">.</span><span class="n">innerText</span>
-</div><div id="l1621" class="code_block">            <span class="c1">#print &quot;Here:&quot;,data</span>
-</div><div id="l1622" class="code_block">            <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="c1"># strip off any spaces </span>
-</div><div id="l1623" class="code_block">            <span class="k">return</span> <span class="n">data</span> 
-</div><div id="l1624" class="code_block">            <span class="c1">#except: print &quot;Failed not get the text from the Cell&quot;</span>
-</div><div id="l1625" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1626" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;No Table Found&quot;</span><span class="p">)</span>
-</div><div id="l1627" class="code_block">            
-</div><div id="l1628" class="code_block">
-</div><div id="l1629" class="code_block">
-</div><div id="l1630" class="code_block">
-</div><div id="l1631" class="code_block">        
-</div><div id="l1632" class="code_block">    <span class="k">def</span> <span class="nf">get_tables</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tlbfilter</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l1633" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a list of tables</span>
-</div><div id="l1634" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1635" class="code_block"><span class="sd">                [filter]    - Get only tables specified by the filter</span>
-</div><div id="l1636" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1637" class="code_block"><span class="sd">                A list of tables</span>
-</div><div id="l1638" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1639" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="s2">&quot;table&quot;</span><span class="p">,</span> <span class="n">tlbfilter</span><span class="p">)</span>
-</div><div id="l1640" class="code_block">    
-</div><div id="l1641" class="code_block">    <span class="k">def</span> <span class="nf">get_text_area</span> <span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l1642" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a text area.</span>
-</div><div id="l1643" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1644" class="code_block"><span class="sd">                name    - The name, id or index of the textarea</span>
-</div><div id="l1645" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1646" class="code_block"><span class="sd">                The text area if found.</span>
-</div><div id="l1647" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1648" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l1649" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element_by_index</span> <span class="p">(</span><span class="s2">&quot;text_area&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1650" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1651" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="s2">&quot;textarea&quot;</span><span class="p">,</span> <span class="s2">&quot;name;id&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1652" class="code_block">      
-</div><div id="l1653" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1654" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getTextArea () did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1655" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1656" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1657" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l1658" class="code_block">            <span class="k">return</span> <span class="n">found_element</span>
-</div><div id="l1659" class="code_block">
-</div><div id="l1660" class="code_block">    <span class="k">def</span> <span class="nf">get_text_area_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">attribute</span><span class="p">):</span>
-</div><div id="l1661" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the value of an attribute on a textarea</span>
-</div><div id="l1662" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1663" class="code_block"><span class="sd">                name        - The id, name or index of the textarea, or a textarea element.</span>
-</div><div id="l1664" class="code_block"><span class="sd">                attribute   - The name of the attribute to get the value for</span>
-</div><div id="l1665" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1666" class="code_block"><span class="sd">                The value of the attribute</span>
-</div><div id="l1667" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1668" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l1669" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">getTextArea</span> <span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l1670" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1671" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l1672" class="code_block">            
-</div><div id="l1673" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1674" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getTextArea Value() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1675" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1676" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1677" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l1678" class="code_block">            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">getElementValue</span><span class="p">(</span><span class="n">found_element</span><span class="p">,</span> <span class="n">attribute</span><span class="p">)</span>
-</div><div id="l1679" class="code_block">        
-</div><div id="l1680" class="code_block">
-</div><div id="l1681" class="code_block">    <span class="k">def</span> <span class="nf">get_text_areas</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="nb">filter</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l1682" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a list of textareas</span>
-</div><div id="l1683" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1684" class="code_block"><span class="sd">                [filter]    - Get only textareas specified by the filter</span>
-</div><div id="l1685" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1686" class="code_block"><span class="sd">                A list of textareas</span>
-</div><div id="l1687" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1688" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="s2">&quot;textarea&quot;</span><span class="p">)</span>
-</div><div id="l1689" class="code_block">
-</div><div id="l1690" class="code_block">    <span class="k">def</span> <span class="nf">get_text_areas_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">attribute</span><span class="p">,</span> <span class="nb">filter</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l1691" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a list of the specified value for the textareas</span>
-</div><div id="l1692" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1693" class="code_block"><span class="sd">                attribute   - The name of the attribute to get the value for</span>
-</div><div id="l1694" class="code_block"><span class="sd">                [filter]    - Get only textareas specified by the filter</span>
-</div><div id="l1695" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1696" class="code_block"><span class="sd">                A list of link values.</span>
-</div><div id="l1697" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1698" class="code_block">        <span class="n">my_values</span><span class="o">=</span><span class="p">[]</span>
-</div><div id="l1699" class="code_block">        <span class="n">myAreas</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">getTextAreas</span><span class="p">(</span><span class="nb">filter</span><span class="p">)</span>
-</div><div id="l1700" class="code_block">        <span class="k">for</span> <span class="n">area</span> <span class="ow">in</span> <span class="n">myAreas</span><span class="p">[:]:</span>
-</div><div id="l1701" class="code_block">            <span class="n">my_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">area</span><span class="o">.</span><span class="n">getAttribute</span><span class="p">(</span><span class="n">attribute</span><span class="p">))</span>
-</div><div id="l1702" class="code_block">        <span class="k">return</span> <span class="n">my_values</span>
-</div><div id="l1703" class="code_block">    
-</div><div id="l1704" class="code_block">
-</div><div id="l1705" class="code_block">    <span class="k">def</span> <span class="nf">get_textbox</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l1706" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a text box.</span>
-</div><div id="l1707" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1708" class="code_block"><span class="sd">                name    - The name, id or index of the textbox</span>
-</div><div id="l1709" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1710" class="code_block"><span class="sd">                The text area if found.</span>
-</div><div id="l1711" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1712" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l1713" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element_by_index</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1714" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1715" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;id;name;value&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1716" class="code_block">        
-</div><div id="l1717" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1718" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getTextBox () did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1719" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1720" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1721" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l1722" class="code_block">            <span class="k">return</span> <span class="n">found_element</span>
-</div><div id="l1723" class="code_block">
-</div><div id="l1724" class="code_block">    <span class="k">def</span> <span class="nf">get_textbox_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">attribute</span><span class="p">):</span>
-</div><div id="l1725" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the value of an attribute on a textbox</span>
-</div><div id="l1726" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1727" class="code_block"><span class="sd">                name        - The id, name or index of the textbox, or a textbox element</span>
-</div><div id="l1728" class="code_block"><span class="sd">                attribute   - The name of the attribute to get the value for</span>
-</div><div id="l1729" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1730" class="code_block"><span class="sd">                The value of the attribute</span>
-</div><div id="l1731" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1732" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l1733" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">getTextBox</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l1734" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1735" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l1736" class="code_block">            
-</div><div id="l1737" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1738" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** getTextBox Value() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1739" class="code_block">            <span class="k">return</span> <span class="bp">None</span>
-</div><div id="l1740" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1741" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l1742" class="code_block">            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">getElementValue</span><span class="p">(</span><span class="n">found_element</span><span class="p">,</span> <span class="n">attribute</span><span class="p">)</span>
-</div><div id="l1743" class="code_block">
-</div><div id="l1744" class="code_block">
-</div><div id="l1745" class="code_block">    <span class="k">def</span> <span class="nf">get_textboxes</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tbfilter</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l1746" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets all the textboxes</span>
-</div><div id="l1747" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1748" class="code_block"><span class="sd">                [tbfilter]    - Get only textboxes specified by the tbfilter</span>
-</div><div id="l1749" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1750" class="code_block"><span class="sd">                A list of textboxes</span>
-</div><div id="l1751" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1752" class="code_block">        <span class="k">if</span> <span class="n">tbfilter</span><span class="p">:</span>
-</div><div id="l1753" class="code_block">            <span class="n">tbfilter</span> <span class="o">=</span> <span class="s2">&quot;type=text;&quot;</span> <span class="o">+</span> <span class="n">tbfilter</span>
-</div><div id="l1754" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1755" class="code_block">            <span class="n">tbfilter</span> <span class="o">=</span> <span class="s2">&quot;type=text&quot;</span>
-</div><div id="l1756" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="n">tbfilter</span><span class="p">)</span>
-</div><div id="l1757" class="code_block">
-</div><div id="l1758" class="code_block">    <span class="k">def</span> <span class="nf">get_textboxes_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">attribute</span><span class="p">,</span> <span class="n">tbfilter</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l1759" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets a list of values for the specified attribute</span>
-</div><div id="l1760" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1761" class="code_block"><span class="sd">                attribute   - The name of the attribute to get the value for</span>
-</div><div id="l1762" class="code_block"><span class="sd">                [tbfilter]    - Get only textboxes specified by the tbfilter</span>
-</div><div id="l1763" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1764" class="code_block"><span class="sd">                A list of the specified value of the attribute</span>
-</div><div id="l1765" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1766" class="code_block">        <span class="n">my_values</span><span class="o">=</span><span class="p">[]</span>
-</div><div id="l1767" class="code_block">        <span class="n">myBoxes</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">getTextBoxes</span><span class="p">()</span>
-</div><div id="l1768" class="code_block">        <span class="k">for</span> <span class="n">box</span> <span class="ow">in</span> <span class="n">myBoxes</span><span class="p">[:]:</span>
-</div><div id="l1769" class="code_block">            <span class="n">my_values</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">box</span><span class="o">.</span><span class="n">getAttribute</span><span class="p">(</span><span class="n">attribute</span><span class="p">))</span>
-</div><div id="l1770" class="code_block">        <span class="k">return</span> <span class="n">my_values</span>
-</div><div id="l1771" class="code_block">
-</div><div id="l1772" class="code_block">    <span class="k">def</span> <span class="nf">go_back</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</div><div id="l1773" class="code_block">        <span class="sd">&quot;&quot;&quot;</span>
-</div><div id="l1774" class="code_block"><span class="sd">            Navigates backward one item in the history list</span>
-</div><div id="l1775" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1776" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span>
-</div><div id="l1777" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">GoBack</span><span class="p">()</span>
-</div><div id="l1778" class="code_block">
-</div><div id="l1779" class="code_block">
-</div><div id="l1780" class="code_block">    <span class="k">def</span> <span class="nf">image_exists</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l1781" class="code_block">        <span class="sd">&quot;&quot;&quot; Checks to see if a image exists in the HTML document.  It does not</span>
-</div><div id="l1782" class="code_block"><span class="sd">            check to see if the image actually exists on the server.</span>
-</div><div id="l1783" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1784" class="code_block"><span class="sd">                name   - The id, name, src or index of the image.</span>
-</div><div id="l1785" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1786" class="code_block"><span class="sd">                True if the image is found, else False</span>
-</div><div id="l1787" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1788" class="code_block">        <span class="n">myElement</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">getImage</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l1789" class="code_block">        <span class="k">if</span> <span class="n">myElement</span><span class="p">:</span>
-</div><div id="l1790" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l1791" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1792" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l1793" class="code_block">
-</div><div id="l1794" class="code_block">    <span class="k">def</span> <span class="nf">link_exists</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l1795" class="code_block">        <span class="sd">&quot;&quot;&quot; Checks to see if a link exists</span>
-</div><div id="l1796" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1797" class="code_block"><span class="sd">                name   - The id or innerText of the link.</span>
-</div><div id="l1798" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1799" class="code_block"><span class="sd">                True if the link is found, else False</span>
-</div><div id="l1800" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1801" class="code_block">        <span class="n">my_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">getLink</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l1802" class="code_block">        <span class="k">if</span> <span class="n">my_element</span><span class="p">:</span>
-</div><div id="l1803" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l1804" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1805" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l1806" class="code_block">
-</div><div id="l1807" class="code_block">    <span class="k">def</span> <span class="nf">list_box_unselect</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
-</div><div id="l1808" class="code_block">        <span class="sd">&quot;&quot;&quot; Selects an item in a list box.</span>
-</div><div id="l1809" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1810" class="code_block"><span class="sd">                name    - The name or id of the listbox</span>
-</div><div id="l1811" class="code_block"><span class="sd">                value   - The value of the item to select in the list</span>
-</div><div id="l1812" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1813" class="code_block"><span class="sd">                True on success, else False</span>
-</div><div id="l1814" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1815" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span>
-</div><div id="l1816" class="code_block">        <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="s2">&quot;select&quot;</span><span class="p">,</span> <span class="s2">&quot;name;id&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1817" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1818" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** selectListBox() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span> <span class="o">+</span> <span class="s2">&quot;-&quot;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">))</span>
-</div><div id="l1819" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l1820" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1821" class="code_block">            <span class="k">for</span> <span class="n">el</span> <span class="ow">in</span> <span class="n">found_element</span><span class="p">:</span>
-</div><div id="l1822" class="code_block">                <span class="k">if</span> <span class="n">el</span><span class="o">.</span><span class="n">text</span> <span class="o">==</span> <span class="n">value</span><span class="p">:</span>
-</div><div id="l1823" class="code_block">                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">el</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l1824" class="code_block">                    <span class="n">el</span><span class="o">.</span><span class="n">selected</span> <span class="o">=</span> <span class="bp">False</span>
-</div><div id="l1825" class="code_block">                    <span class="c1">#found_element.FireEvent(&quot;onChange&quot;)</span>
-</div><div id="l1826" class="code_block">                    <span class="n">bResult</span> <span class="o">=</span> <span class="bp">True</span>
-</div><div id="l1827" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l1828" class="code_block">
-</div><div id="l1829" class="code_block">    <span class="k">def</span> <span class="nf">location_name</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</div><div id="l1830" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the location name of the current page. If the resource is an HTML page on the World Wide Web, the name is the title of that page.</span>
-</div><div id="l1831" class="code_block"><span class="sd">            If the resource is a folder or file on the network or local computer, the name is the</span>
-</div><div id="l1832" class="code_block"><span class="sd">            full path of the folder or file in Universal Naming Convention (UNC) format.</span>
-</div><div id="l1833" class="code_block"><span class="sd">            </span>
-</div><div id="l1834" class="code_block"><span class="sd">            **NOTE** If you have &quot;Hide extensions for known file types&quot; enabled, then of course that is not</span>
-</div><div id="l1835" class="code_block"><span class="sd">            returned.</span>
-</div><div id="l1836" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1837" class="code_block"><span class="sd">                None</span>
-</div><div id="l1838" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1839" class="code_block"><span class="sd">                The name of the location</span>
-</div><div id="l1840" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1841" class="code_block">            
-</div><div id="l1842" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span>
-</div><div id="l1843" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">LocationName</span>
-</div><div id="l1844" class="code_block">
-</div><div id="l1845" class="code_block">
-</div><div id="l1846" class="code_block">    <span class="k">def</span> <span class="nf">location_url</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</div><div id="l1847" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the URL of the current page</span>
-</div><div id="l1848" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1849" class="code_block"><span class="sd">                None</span>
-</div><div id="l1850" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1851" class="code_block"><span class="sd">                The URL of the page</span>
-</div><div id="l1852" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1853" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span> 
-</div><div id="l1854" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">LocationURL</span>
-</div><div id="l1855" class="code_block">
-</div><div id="l1856" class="code_block">
-</div><div id="l1857" class="code_block">    <span class="k">def</span> <span class="nf">navigate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">url</span><span class="p">):</span>
-</div><div id="l1858" class="code_block">        <span class="sd">&quot;&quot;&quot; Go to the specified URL.</span>
-</div><div id="l1859" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1860" class="code_block"><span class="sd">                url - URL to navigate to</span>
-</div><div id="l1861" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1862" class="code_block"><span class="sd">                True on success, else False</span>
-</div><div id="l1863" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1864" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l1865" class="code_block">            <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span> 
-</div><div id="l1866" class="code_block">            <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Navigate</span><span class="p">(</span><span class="n">url</span><span class="p">)</span>
-</div><div id="l1867" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l1868" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l1869" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l1870" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l1871" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l1872" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l1873" class="code_block">
-</div><div id="l1874" class="code_block">    <span class="k">def</span> <span class="nf">outer_html</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</div><div id="l1875" class="code_block">        <span class="sd">&quot;&quot;&quot; Gets the  outerHTML</span>
-</div><div id="l1876" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1877" class="code_block"><span class="sd">                None</span>
-</div><div id="l1878" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1879" class="code_block"><span class="sd">                a string consisting of:</span>
-</div><div id="l1880" class="code_block"><span class="sd">                Body block as a string.</span>
-</div><div id="l1881" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1882" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span> 
-</div><div id="l1883" class="code_block">        
-</div><div id="l1884" class="code_block">        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame_name</span><span class="p">:</span>
-</div><div id="l1885" class="code_block">            <span class="k">return</span> <span class="s1">&#39;</span><span class="si">%s</span><span class="s1">&#39;</span><span class="o">%</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">frames</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">frame_name</span><span class="p">]</span><span class="o">.</span><span class="n">document</span><span class="o">.</span><span class="n">body</span><span class="o">.</span><span class="n">outerHTML</span><span class="p">)</span>
-</div><div id="l1886" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1887" class="code_block">            <span class="k">return</span> <span class="s1">&#39;</span><span class="si">%s</span><span class="s1">&#39;</span><span class="o">%</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">body</span><span class="o">.</span><span class="n">outerHTML</span><span class="p">)</span>
-</div><div id="l1888" class="code_block">
-</div><div id="l1889" class="code_block">    <span class="k">def</span> <span class="nf">pause</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">string</span> <span class="o">=</span> <span class="s2">&quot;Click to Continue test&quot;</span><span class="p">):</span>
-</div><div id="l1890" class="code_block">        <span class="sd">&quot;&quot;&quot; Wait for the user to click a button to continue testing.</span>
-</div><div id="l1891" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1892" class="code_block"><span class="sd">                [string]  = Message to display to user</span>
-</div><div id="l1893" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1894" class="code_block"><span class="sd">                None</span>
-</div><div id="l1895" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1896" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span>
-</div><div id="l1897" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l1898" class="code_block">           <span class="n">win32gui</span><span class="o">.</span><span class="n">MessageBox</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">string</span><span class="p">,</span> <span class="s2">&quot;Pausing test...&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
-</div><div id="l1899" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l1900" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l1901" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l1902" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l1903" class="code_block">        <span class="k">else</span><span class="p">:</span>   <span class="k">return</span> <span class="bp">True</span>         
-</div><div id="l1904" class="code_block">
-</div><div id="l1905" class="code_block">    <span class="k">def</span> <span class="nf">quit</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</div><div id="l1906" class="code_block">        <span class="sd">&quot;&quot;&quot; Quit the IE browser and close it.</span>
-</div><div id="l1907" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1908" class="code_block"><span class="sd">                None</span>
-</div><div id="l1909" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1910" class="code_block"><span class="sd">                True on success, else False</span>
-</div><div id="l1911" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1912" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span>
-</div><div id="l1913" class="code_block">        <span class="k">try</span><span class="p">:</span>    <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Quit</span><span class="p">()</span>
-</div><div id="l1914" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l1915" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l1916" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l1917" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l1918" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l1919" class="code_block">        <span class="k">else</span><span class="p">:</span>   <span class="k">return</span> <span class="bp">True</span>      
-</div><div id="l1920" class="code_block">
-</div><div id="l1921" class="code_block">
-</div><div id="l1922" class="code_block">    <span class="k">def</span> <span class="nf">random_digits</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">length</span><span class="p">):</span> 
-</div><div id="l1923" class="code_block">        <span class="sd">&quot;&quot;&quot; Creates a string of random digits.</span>
-</div><div id="l1924" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1925" class="code_block"><span class="sd">                length  - The length of the number to be created</span>
-</div><div id="l1926" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1927" class="code_block"><span class="sd">                The string of random digits</span>
-</div><div id="l1928" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1929" class="code_block">        <span class="n">a</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">(</span><span class="n">string</span><span class="o">.</span><span class="n">digits</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">length</span><span class="p">)])</span>
-</div><div id="l1930" class="code_block">        <span class="n">count</span> <span class="o">=</span> <span class="n">a</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="n">a</span><span class="p">)</span>
-</div><div id="l1931" class="code_block">        <span class="n">count</span> <span class="o">=</span> <span class="mi">0</span>
-</div><div id="l1932" class="code_block">        <span class="k">while</span> <span class="n">count</span> <span class="o">&lt;=</span> <span class="n">length</span><span class="p">:</span>
-</div><div id="l1933" class="code_block">            <span class="k">return</span> <span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">a</span><span class="p">)</span>
-</div><div id="l1934" class="code_block">        
-</div><div id="l1935" class="code_block">    <span class="k">def</span> <span class="nf">random_string</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">length</span><span class="p">):</span> 
-</div><div id="l1936" class="code_block">        <span class="sd">&quot;&quot;&quot; Creates a string of random upper and lower case characters</span>
-</div><div id="l1937" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1938" class="code_block"><span class="sd">                length  - The length of the string to be created</span>
-</div><div id="l1939" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1940" class="code_block"><span class="sd">                The string of random characters</span>
-</div><div id="l1941" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1942" class="code_block">        <span class="n">a</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">(</span><span class="n">string</span><span class="o">.</span><span class="n">letters</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">length</span><span class="p">)])</span>
-</div><div id="l1943" class="code_block">        <span class="n">count</span> <span class="o">=</span> <span class="n">a</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="n">a</span><span class="p">)</span>
-</div><div id="l1944" class="code_block">        <span class="n">count</span> <span class="o">=</span> <span class="mi">0</span>
-</div><div id="l1945" class="code_block">        <span class="k">while</span> <span class="n">count</span> <span class="o">&lt;=</span> <span class="n">length</span><span class="p">:</span>
-</div><div id="l1946" class="code_block">            <span class="k">return</span> <span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">a</span><span class="p">)</span>
-</div><div id="l1947" class="code_block">        
-</div><div id="l1948" class="code_block">    <span class="k">def</span> <span class="nf">refresh</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</div><div id="l1949" class="code_block">        <span class="sd">&quot;&quot;&quot; Refresh the current page in the broswer</span>
-</div><div id="l1950" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1951" class="code_block"><span class="sd">                None</span>
-</div><div id="l1952" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1953" class="code_block"><span class="sd">                True on success, else False</span>
-</div><div id="l1954" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1955" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span>
-</div><div id="l1956" class="code_block">        <span class="k">try</span><span class="p">:</span>    <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Refresh</span><span class="p">()</span>
-</div><div id="l1957" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l1958" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l1959" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l1960" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l1961" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l1962" class="code_block">        <span class="k">else</span><span class="p">:</span>   <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l1963" class="code_block">
-</div><div id="l1964" class="code_block">    <span class="k">def</span> <span class="nf">resize</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">iWidth</span><span class="p">,</span> <span class="n">iHeight</span><span class="p">):</span>
-</div><div id="l1965" class="code_block">    	<span class="s2">&quot;Resize the window&quot;</span>
-</div><div id="l1966" class="code_block">    	<span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">resizeTo</span><span class="p">(</span><span class="n">iWidth</span><span class="p">,</span> <span class="n">iHeight</span><span class="p">)</span>
-</div><div id="l1967" class="code_block">
-</div><div id="l1968" class="code_block">
-</div><div id="l1969" class="code_block">    <span class="k">def</span> <span class="nf">select_listbox</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
-</div><div id="l1970" class="code_block">        <span class="sd">&quot;&quot;&quot; Selects an item in a list box.</span>
-</div><div id="l1971" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1972" class="code_block"><span class="sd">                name    - The name or id of the listbox</span>
-</div><div id="l1973" class="code_block"><span class="sd">                value   - The value of the item to select in the list</span>
-</div><div id="l1974" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1975" class="code_block"><span class="sd">                True on success, else False</span>
-</div><div id="l1976" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l1977" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span>
-</div><div id="l1978" class="code_block">        <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="s2">&quot;select&quot;</span><span class="p">,</span> <span class="s2">&quot;name;id&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l1979" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l1980" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** selectListBox() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span> <span class="o">+</span> <span class="s2">&quot;-&quot;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">))</span>
-</div><div id="l1981" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l1982" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l1983" class="code_block">            <span class="k">for</span> <span class="n">el</span> <span class="ow">in</span> <span class="n">found_element</span><span class="p">:</span>
-</div><div id="l1984" class="code_block">                <span class="k">if</span> <span class="n">el</span><span class="o">.</span><span class="n">text</span> <span class="o">==</span> <span class="n">value</span><span class="p">:</span>
-</div><div id="l1985" class="code_block">                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">el</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l1986" class="code_block">                    <span class="n">el</span><span class="o">.</span><span class="n">selected</span> <span class="o">=</span> <span class="bp">True</span>
-</div><div id="l1987" class="code_block">                    <span class="c1">#found_element.FireEvent(&quot;onChange&quot;)</span>
-</div><div id="l1988" class="code_block">                    <span class="n">bResult</span> <span class="o">=</span> <span class="bp">True</span>
-</div><div id="l1989" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l1990" class="code_block">
-</div><div id="l1991" class="code_block">    <span class="k">def</span> <span class="nf">set_checkbox</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
-</div><div id="l1992" class="code_block">        <span class="sd">&quot;&quot;&quot; Sets the value of a check box.</span>
-</div><div id="l1993" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l1994" class="code_block"><span class="sd">                name   - The id, name, or value of the checkbox.</span>
-</div><div id="l1995" class="code_block"><span class="sd">                value  - 0 for false (not checked)</span>
-</div><div id="l1996" class="code_block"><span class="sd">                         1 for true (checked)</span>
-</div><div id="l1997" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l1998" class="code_block"><span class="sd">                True on success, else False</span>
-</div><div id="l1999" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l2000" class="code_block">        <span class="n">my_elements</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;type=checkbox&quot;</span><span class="p">)</span>
-</div><div id="l2001" class="code_block">        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">setElement</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;id;name;value&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="s2">&quot;checked&quot;</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="bp">None</span><span class="p">,</span> <span class="n">my_elements</span><span class="p">)</span>
-</div><div id="l2002" class="code_block">
-</div><div id="l2003" class="code_block">      
-</div><div id="l2004" class="code_block">    <span class="k">def</span> <span class="nf">set_element</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">,</span> <span class="n">att</span><span class="p">,</span> <span class="n">val</span><span class="p">,</span> <span class="n">setAtt</span><span class="p">,</span> <span class="n">setVal</span><span class="p">,</span> <span class="n">element</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="n">elementList</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l2005" class="code_block">        <span class="sd">&quot;&quot;&quot; Sets the specified attribute of any element</span>
-</div><div id="l2006" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l2007" class="code_block"><span class="sd">                tag             - The HTML tag name</span>
-</div><div id="l2008" class="code_block"><span class="sd">                att             - The tag attribute to search for</span>
-</div><div id="l2009" class="code_block"><span class="sd">                val             - The attribute value to match</span>
-</div><div id="l2010" class="code_block"><span class="sd">                setAtt          - The attribute to set</span>
-</div><div id="l2011" class="code_block"><span class="sd">                setVal          - The values you are setting</span>
-</div><div id="l2012" class="code_block"><span class="sd">                [element]       - Specify a specific element</span>
-</div><div id="l2013" class="code_block"><span class="sd">                [elementList]   - Find the element in the passed list</span>
-</div><div id="l2014" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l2015" class="code_block"><span class="sd">                True on success, else False</span>
-</div><div id="l2016" class="code_block"><span class="sd">        &quot;&quot;&quot;</span> 
-</div><div id="l2017" class="code_block">        <span class="k">if</span> <span class="n">element</span><span class="p">:</span>
-</div><div id="l2018" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="n">element</span>
-</div><div id="l2019" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l2020" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="n">tag</span><span class="p">,</span> <span class="n">att</span><span class="p">,</span> <span class="n">val</span><span class="p">,</span> <span class="n">elementList</span><span class="p">)</span>
-</div><div id="l2021" class="code_block">            
-</div><div id="l2022" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l2023" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** setElement() did not find &quot;</span> <span class="o">+</span> <span class="n">tag</span> <span class="o">+</span> <span class="s2">&quot;-&quot;</span> <span class="o">+</span> <span class="n">att</span> <span class="o">+</span> <span class="s2">&quot;-&quot;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">val</span><span class="p">))</span>
-</div><div id="l2024" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l2025" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l2026" class="code_block">            <span class="k">try</span><span class="p">:</span>
-</div><div id="l2027" class="code_block">                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l2028" class="code_block">                <span class="n">found_element</span><span class="o">.</span><span class="n">focus</span><span class="p">()</span>
-</div><div id="l2029" class="code_block">                <span class="n">found_element</span><span class="o">.</span><span class="n">blur</span><span class="p">()</span>
-</div><div id="l2030" class="code_block">                <span class="n">found_element</span><span class="o">.</span><span class="n">setAttribute</span><span class="p">(</span><span class="n">setAtt</span><span class="p">,</span> <span class="n">setVal</span><span class="p">)</span>
-</div><div id="l2031" class="code_block">                <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l2032" class="code_block">            <span class="k">except</span><span class="p">:</span>
-</div><div id="l2033" class="code_block">                <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l2034" class="code_block">                <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l2035" class="code_block">                <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l2036" class="code_block">                <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l2037" class="code_block">            <span class="k">else</span><span class="p">:</span>
-</div><div id="l2038" class="code_block">                <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l2039" class="code_block">
-</div><div id="l2040" class="code_block">    <span class="k">def</span> <span class="nf">set_radio_button</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">checked</span><span class="o">=</span><span class="bp">True</span><span class="p">):</span>
-</div><div id="l2041" class="code_block">        <span class="sd">&quot;&quot;&quot; Sets a Radio Button value</span>
-</div><div id="l2042" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l2043" class="code_block"><span class="sd">                name        - radio button group name</span>
-</div><div id="l2044" class="code_block"><span class="sd">                value       - Which item to pick by name</span>
-</div><div id="l2045" class="code_block"><span class="sd">                [checked]   - Check the button, True or False</span>
-</div><div id="l2046" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l2047" class="code_block"><span class="sd">                True on success, else False</span>
-</div><div id="l2048" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l2049" class="code_block">        <span class="c1">#TODO: Find way to get innerText</span>
-</div><div id="l2050" class="code_block">        <span class="n">my_elements</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_elements_list</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;type=radio;name=</span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">name</span><span class="p">))</span>
-</div><div id="l2051" class="code_block">        <span class="k">for</span> <span class="n">el</span> <span class="ow">in</span> <span class="n">my_elements</span><span class="p">[:]:</span>
-</div><div id="l2052" class="code_block">            <span class="k">if</span> <span class="n">el</span><span class="o">.</span><span class="n">value</span> <span class="o">==</span> <span class="n">value</span><span class="p">:</span>
-</div><div id="l2053" class="code_block">                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">el</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l2054" class="code_block">                <span class="n">el</span><span class="o">.</span><span class="n">checked</span> <span class="o">=</span> <span class="n">checked</span>
-</div><div id="l2055" class="code_block">                <span class="n">el</span><span class="o">.</span><span class="n">FireEvent</span><span class="p">(</span><span class="s2">&quot;onClick&quot;</span><span class="p">)</span>
-</div><div id="l2056" class="code_block">                <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l2057" class="code_block">
-</div><div id="l2058" class="code_block">        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** setRadioButton() did not find </span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">name</span><span class="p">))</span>
-</div><div id="l2059" class="code_block">        <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l2060" class="code_block">
-</div><div id="l2061" class="code_block">    <span class="k">def</span> <span class="nf">set_text_area</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
-</div><div id="l2062" class="code_block">        <span class="sd">&quot;&quot;&quot; Sets the text in a textarea.</span>
-</div><div id="l2063" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l2064" class="code_block"><span class="sd">                name    - The id, name or index of the text area, or a textarea element.</span>
-</div><div id="l2065" class="code_block"><span class="sd">                value   - The value to set the text area to.</span>
-</div><div id="l2066" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l2067" class="code_block"><span class="sd">                True on succes, else False</span>
-</div><div id="l2068" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l2069" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l2070" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="s2">&quot;textarea&quot;</span><span class="p">,</span> <span class="s2">&quot;name;id&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l2071" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l2072" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l2073" class="code_block">
-</div><div id="l2074" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l2075" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** setTextArea() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span> <span class="o">+</span> <span class="s2">&quot;-&quot;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">))</span>
-</div><div id="l2076" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l2077" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l2078" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l2079" class="code_block">            <span class="n">found_element</span><span class="o">.</span><span class="n">value</span> <span class="o">=</span> <span class="n">value</span>
-</div><div id="l2080" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l2081" class="code_block">
-</div><div id="l2082" class="code_block">    <span class="k">def</span> <span class="nf">set_textbox</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
-</div><div id="l2083" class="code_block">        <span class="sd">&quot;&quot;&quot; Sets the text in a text box.</span>
-</div><div id="l2084" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l2085" class="code_block"><span class="sd">                name    - The id, name or index of a textbox, or a textbox element.</span>
-</div><div id="l2086" class="code_block"><span class="sd">                value   - The value to set the textbox to.</span>
-</div><div id="l2087" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l2088" class="code_block"><span class="sd">                True on succes, else False</span>
-</div><div id="l2089" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l2090" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l2091" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">getTextBox</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l2092" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l2093" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l2094" class="code_block">
-</div><div id="l2095" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l2096" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** setTextBox() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span> <span class="o">+</span> <span class="s2">&quot;-&quot;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">))</span>
-</div><div id="l2097" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l2098" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l2099" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l2100" class="code_block">            <span class="n">found_element</span><span class="o">.</span><span class="n">value</span> <span class="o">=</span> <span class="n">value</span>
-</div><div id="l2101" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l2102" class="code_block">
-</div><div id="l2103" class="code_block">    <span class="k">def</span> <span class="nf">show_all_table_text</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</div><div id="l2104" class="code_block">        <span class="sd">&quot;&quot;&quot; verifies text in a table</span>
-</div><div id="l2105" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l2106" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span> 
-</div><div id="l2107" class="code_block">        <span class="c1"># Get tags names table</span>
-</div><div id="l2108" class="code_block">        <span class="n">table</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">getElementsByTagName</span><span class="p">(</span><span class="s1">&#39;table&#39;</span><span class="p">)</span>
-</div><div id="l2109" class="code_block">        
-</div><div id="l2110" class="code_block">        <span class="c1"># loop thru all the tables</span>
-</div><div id="l2111" class="code_block">        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">table</span><span class="o">.</span><span class="n">length</span><span class="p">):</span>
-</div><div id="l2112" class="code_block">            <span class="n">tablecnt</span> <span class="o">=</span> <span class="mi">0</span>
-</div><div id="l2113" class="code_block">            <span class="n">errortxt</span> <span class="o">=</span> <span class="n">table</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">cells</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">innerText</span>
-</div><div id="l2114" class="code_block">            <span class="n">tablecnt</span> <span class="o">=</span> <span class="n">i</span> <span class="o">+</span><span class="mi">1</span>
-</div><div id="l2115" class="code_block">            <span class="n">errortxt</span><span class="o">=</span> <span class="n">errortxt</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
-</div><div id="l2116" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;tableNum:</span><span class="si">%s</span><span class="s2"> and Text: </span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">tablecnt</span><span class="p">,</span> <span class="n">errortxt</span><span class="p">))</span>     
-</div><div id="l2117" class="code_block">
-</div><div id="l2118" class="code_block">
-</div><div id="l2119" class="code_block">    <span class="k">def</span> <span class="nf">show_table_text</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span><span class="n">tableName</span><span class="p">,</span><span class="n">rownum</span><span class="p">,</span><span class="n">cellnum</span> <span class="p">):</span>
-</div><div id="l2120" class="code_block">        <span class="sd">&quot;&quot;&quot; Print out table index and the innertext</span>
-</div><div id="l2121" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l2122" class="code_block">        
-</div><div id="l2123" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span> 
-</div><div id="l2124" class="code_block">        <span class="n">table</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">getElementsByTagName</span><span class="p">(</span><span class="s1">&#39;table&#39;</span><span class="p">)</span>
-</div><div id="l2125" class="code_block">        <span class="n">table</span><span class="p">[</span><span class="n">tableName</span><span class="p">]</span><span class="o">.</span><span class="n">rows</span><span class="p">[</span><span class="n">rownum</span><span class="p">]</span><span class="o">.</span><span class="n">cells</span><span class="p">[</span><span class="n">cellnum</span><span class="p">]</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span> <span class="s1">&#39;red&#39;</span>
-</div><div id="l2126" class="code_block">        <span class="k">print</span><span class="p">(</span> <span class="n">table</span><span class="p">[</span><span class="n">tableName</span><span class="p">]</span><span class="o">.</span><span class="n">rows</span><span class="p">[</span><span class="n">rownum</span><span class="p">]</span><span class="o">.</span><span class="n">cells</span><span class="p">[</span><span class="n">cellnum</span><span class="p">]</span><span class="o">.</span><span class="n">innerText</span><span class="p">)</span>
-</div><div id="l2127" class="code_block">         
-</div><div id="l2128" class="code_block">    <span class="k">def</span> <span class="nf">show_link_by_index</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</div><div id="l2129" class="code_block">        
-</div><div id="l2130" class="code_block">        <span class="n">links</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">links</span><span class="o">.</span><span class="n">length</span>
-</div><div id="l2131" class="code_block">        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">links</span><span class="p">):</span>
-</div><div id="l2132" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">i</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">links</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">innertext</span><span class="p">)</span>
-</div><div id="l2133" class="code_block">
-</div><div id="l2134" class="code_block">
-</div><div id="l2135" class="code_block">    <span class="k">def</span> <span class="nf">start_timer</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</div><div id="l2136" class="code_block">        <span class="sd">&quot;&quot;&quot;</span>
-</div><div id="l2137" class="code_block"><span class="sd">            Start time for this timer</span>
-</div><div id="l2138" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l2139" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">timer</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span>
-</div><div id="l2140" class="code_block">
-</div><div id="l2141" class="code_block">    <span class="k">def</span> <span class="nf">stop</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</div><div id="l2142" class="code_block">        <span class="sd">&quot;&quot;&quot;</span>
-</div><div id="l2143" class="code_block"><span class="sd">            Cancels any in process navigation </span>
-</div><div id="l2144" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l2145" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span>
-</div><div id="l2146" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Stop</span><span class="p">()</span>
-</div><div id="l2147" class="code_block">      
-</div><div id="l2148" class="code_block">
-</div><div id="l2149" class="code_block">    <span class="k">def</span> <span class="nf">stop_timer</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</div><div id="l2150" class="code_block">        <span class="sd">&quot;&quot;&quot;</span>
-</div><div id="l2151" class="code_block"><span class="sd">            Stop timer and calc the time difference</span>
-</div><div id="l2152" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l2153" class="code_block">        <span class="c1"># Wait is very important - wait for the doc to complete</span>
-</div><div id="l2154" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span> 
-</div><div id="l2155" class="code_block">        <span class="n">td</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">timer</span>
-</div><div id="l2156" class="code_block">       
-</div><div id="l2157" class="code_block">
-</div><div id="l2158" class="code_block">        <span class="c1"># Calc in seconds, days, and microseconds</span>
-</div><div id="l2159" class="code_block">        <span class="c1"># Change to seconds</span>
-</div><div id="l2160" class="code_block">        <span class="n">seconds</span> <span class="o">=</span> <span class="n">td</span><span class="o">.</span><span class="n">seconds</span> <span class="o">+</span> <span class="n">td</span><span class="o">.</span><span class="n">days</span><span class="o">*</span><span class="mi">24</span><span class="o">*</span><span class="mi">60</span><span class="o">*</span><span class="mi">60</span>
-</div><div id="l2161" class="code_block">
-</div><div id="l2162" class="code_block">        <span class="c1"># return time</span>
-</div><div id="l2163" class="code_block">        <span class="k">return</span> <span class="s1">&#39;Total time:</span><span class="si">%s</span><span class="s1"> - The time for this script to run was aprox. </span><span class="si">%s</span><span class="s1"> seconds&#39;</span> <span class="o">%</span> <span class="p">(</span><span class="n">td</span><span class="p">,</span> <span class="n">seconds</span><span class="p">)</span>
-</div><div id="l2164" class="code_block">
-</div><div id="l2165" class="code_block">
-</div><div id="l2166" class="code_block">    <span class="k">def</span> <span class="nf">submit_form</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="bp">None</span><span class="p">):</span>
-</div><div id="l2167" class="code_block">        <span class="sd">&quot;&quot;&quot; Submits a form. For proper testing you should submit a form as a user</span>
-</div><div id="l2168" class="code_block"><span class="sd">            would, such as clicking the submit button.</span>
-</div><div id="l2169" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l2170" class="code_block"><span class="sd">                [name] - name of form</span>
-</div><div id="l2171" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l2172" class="code_block"><span class="sd">                True on success, else False</span>
-</div><div id="l2173" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l2174" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l2175" class="code_block">            <span class="k">if</span> <span class="n">name</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span> <span class="n">name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">form_name</span> 
-</div><div id="l2176" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">find_element</span><span class="p">(</span><span class="s2">&quot;form&quot;</span><span class="p">,</span> <span class="s2">&quot;id;name&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l2177" class="code_block">            <span class="k">if</span> <span class="n">found_element</span><span class="p">:</span>
-</div><div id="l2178" class="code_block">                <span class="n">found_element</span><span class="o">.</span><span class="n">submit</span><span class="p">()</span>
-</div><div id="l2179" class="code_block">                <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l2180" class="code_block">            <span class="k">else</span><span class="p">:</span>
-</div><div id="l2181" class="code_block">                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** submitForm() did not find the &quot;</span> <span class="o">+</span> <span class="n">name</span> <span class="o">+</span> <span class="s2">&quot; form&quot;</span><span class="p">)</span>
-</div><div id="l2182" class="code_block">                <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l2183" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l2184" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l2185" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l2186" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l2187" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l2188" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l2189" class="code_block">            <span class="k">return</span> <span class="bp">True</span>          
-</div><div id="l2190" class="code_block">
-</div><div id="l2191" class="code_block">    <span class="k">def</span> <span class="nf">table_cell_exists</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tableName</span><span class="p">,</span> <span class="n">cellText</span><span class="p">):</span>
-</div><div id="l2192" class="code_block">        <span class="sd">&quot;&quot;&quot; Checks to see if a cell in a table exists</span>
-</div><div id="l2193" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l2194" class="code_block"><span class="sd">                tableName   - The id, name or index of the table, or a table element.</span>
-</div><div id="l2195" class="code_block"><span class="sd">                cellText    - The cell text to search for</span>
-</div><div id="l2196" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l2197" class="code_block"><span class="sd">                True if the table is found, else False</span>
-</div><div id="l2198" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l2199" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">tableName</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">tableName</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l2200" class="code_block">            <span class="n">myTable</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">getTable</span><span class="p">(</span><span class="n">tableName</span><span class="p">)</span>
-</div><div id="l2201" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l2202" class="code_block">            <span class="n">myTable</span> <span class="o">=</span> <span class="n">tableName</span>
-</div><div id="l2203" class="code_block">        <span class="n">myCells</span> <span class="o">=</span> <span class="n">myTable</span><span class="o">.</span><span class="n">cells</span>
-</div><div id="l2204" class="code_block">
-</div><div id="l2205" class="code_block">        <span class="k">try</span><span class="p">:</span>
-</div><div id="l2206" class="code_block">            <span class="n">myData</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
-</div><div id="l2207" class="code_block">            <span class="k">for</span> <span class="n">myCell</span> <span class="ow">in</span> <span class="n">myCells</span><span class="p">:</span>
-</div><div id="l2208" class="code_block">                <span class="k">if</span> <span class="n">myCell</span><span class="o">.</span><span class="n">innerText</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">==</span> <span class="n">cellText</span><span class="p">:</span>
-</div><div id="l2209" class="code_block">                    <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l2210" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l2211" class="code_block">        <span class="k">except</span><span class="p">:</span>
-</div><div id="l2212" class="code_block">            <span class="p">(</span><span class="n">ErrorType</span><span class="p">,</span><span class="n">ErrorValue</span><span class="p">,</span><span class="n">ErrorTB</span><span class="p">)</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">()</span>
-</div><div id="l2213" class="code_block">            <span class="k">print</span><span class="p">(</span> <span class="n">sys</span><span class="o">.</span><span class="n">exc_info</span><span class="p">())</span>
-</div><div id="l2214" class="code_block">            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">(</span><span class="n">ErrorTB</span><span class="p">)</span>
-</div><div id="l2215" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l2216" class="code_block">        <span class="k">else</span><span class="p">:</span>   <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l2217" class="code_block">        
-</div><div id="l2218" class="code_block">    <span class="k">def</span> <span class="nf">table_exists</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l2219" class="code_block">        <span class="sd">&quot;&quot;&quot; Checks to see if a table exists</span>
-</div><div id="l2220" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l2221" class="code_block"><span class="sd">                name   - The id or name of the table</span>
-</div><div id="l2222" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l2223" class="code_block"><span class="sd">                True if the table is found, else False</span>
-</div><div id="l2224" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l2225" class="code_block">        <span class="n">myElement</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">getTable</span> <span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l2226" class="code_block">        <span class="k">if</span> <span class="n">myElement</span><span class="p">:</span>
-</div><div id="l2227" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l2228" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l2229" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l2230" class="code_block">
-</div><div id="l2231" class="code_block">    <span class="k">def</span> <span class="nf">table_row_exists</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">row</span><span class="p">):</span>
-</div><div id="l2232" class="code_block">        <span class="sd">&quot;&quot;&quot; Checks to see if a row in a table exists</span>
-</div><div id="l2233" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l2234" class="code_block"><span class="sd">                Name        - The id, name or index of the table, or a table element.</span>
-</div><div id="l2235" class="code_block"><span class="sd">                row[]       - The row to search for. Use * to ignore cell.</span>
-</div><div id="l2236" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l2237" class="code_block"><span class="sd">                True if the table is found, else False</span>
-</div><div id="l2238" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l2239" class="code_block">        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_table_row_index</span> <span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">row</span><span class="p">):</span>
-</div><div id="l2240" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l2241" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l2242" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l2243" class="code_block">
-</div><div id="l2244" class="code_block">    <span class="k">def</span> <span class="nf">text_area_exists</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l2245" class="code_block">        <span class="sd">&quot;&quot;&quot; Checks to see if a textarea exists</span>
-</div><div id="l2246" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l2247" class="code_block"><span class="sd">                name   - The name, id or index of the textarea</span>
-</div><div id="l2248" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l2249" class="code_block"><span class="sd">                True if the textarea is found, else False</span>
-</div><div id="l2250" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l2251" class="code_block">        <span class="n">myElement</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_text_area</span>  <span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l2252" class="code_block">        <span class="k">if</span> <span class="n">myElement</span><span class="p">:</span>
-</div><div id="l2253" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l2254" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l2255" class="code_block">            <span class="k">return</span> <span class="bp">False</span>         
-</div><div id="l2256" class="code_block">         
-</div><div id="l2257" class="code_block">
-</div><div id="l2258" class="code_block">    <span class="k">def</span> <span class="nf">textbox_exists</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l2259" class="code_block">        <span class="sd">&quot;&quot;&quot; Checks to see if a textbox exists</span>
-</div><div id="l2260" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l2261" class="code_block"><span class="sd">                name   - The name or id of the textbox</span>
-</div><div id="l2262" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l2263" class="code_block"><span class="sd">                True if the textbox is found, else False</span>
-</div><div id="l2264" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l2265" class="code_block">        <span class="n">my_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_textbox</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l2266" class="code_block">        <span class="k">if</span> <span class="n">my_element</span><span class="p">:</span>
-</div><div id="l2267" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l2268" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l2269" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l2270" class="code_block">
-</div><div id="l2271" class="code_block">    <span class="k">def</span> <span class="nf">textBox_value</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
-</div><div id="l2272" class="code_block">        <span class="sd">&quot;&quot;&quot; Sets the text in a text box.</span>
-</div><div id="l2273" class="code_block"><span class="sd">            parameters:</span>
-</div><div id="l2274" class="code_block"><span class="sd">                name    - The id, name or index of a textbox, or a textbox element.</span>
-</div><div id="l2275" class="code_block"><span class="sd">                value   - The value to set the textbox to.</span>
-</div><div id="l2276" class="code_block"><span class="sd">            returns:</span>
-</div><div id="l2277" class="code_block"><span class="sd">                True on succes, else False</span>
-</div><div id="l2278" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l2279" class="code_block">        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
-</div><div id="l2280" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_textbox</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-</div><div id="l2281" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l2282" class="code_block">            <span class="n">found_element</span> <span class="o">=</span> <span class="n">name</span>
-</div><div id="l2283" class="code_block">
-</div><div id="l2284" class="code_block">        <span class="k">if</span> <span class="n">found_element</span> <span class="o">==</span> <span class="bp">None</span><span class="p">:</span>
-</div><div id="l2285" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">show_debugging</span><span class="p">:</span> <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;** setTextBox() did not find &quot;</span> <span class="o">+</span> <span class="n">name</span><span class="p">)</span>
-</div><div id="l2286" class="code_block">            <span class="k">return</span> <span class="bp">False</span>
-</div><div id="l2287" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l2288" class="code_block">            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span><span class="p">:</span> <span class="n">found_element</span><span class="o">.</span><span class="n">style</span><span class="o">.</span><span class="n">backgroundColor</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">color_highlight</span>
-</div><div id="l2289" class="code_block">            <span class="n">found_element</span><span class="o">.</span><span class="n">value</span> 
-</div><div id="l2290" class="code_block">            <span class="k">return</span> <span class="n">found_element</span><span class="o">.</span><span class="n">value</span>
-</div><div id="l2291" class="code_block">
-</div><div id="l2292" class="code_block">    <span class="k">def</span> <span class="nf">text_finder</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span><span class="n">text</span><span class="p">):</span>
-</div><div id="l2293" class="code_block">        <span class="sd">&quot;&quot;&quot;</span>
-</div><div id="l2294" class="code_block"><span class="sd">            Find text on a page then highlites it. It also returns a tru/false</span>
-</div><div id="l2295" class="code_block"><span class="sd">        parameters:</span>
-</div><div id="l2296" class="code_block"><span class="sd">            text    - text to search for</span>
-</div><div id="l2297" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l2298" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span>
-</div><div id="l2299" class="code_block">        
-</div><div id="l2300" class="code_block">        <span class="n">rng</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">body</span><span class="o">.</span><span class="n">createTextRange</span><span class="p">();</span>
-</div><div id="l2301" class="code_block">        
-</div><div id="l2302" class="code_block">        <span class="k">if</span> <span class="n">rng</span><span class="o">.</span><span class="n">findText</span><span class="p">(</span><span class="n">text</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span><span class="o">==</span><span class="bp">True</span><span class="p">:</span>
-</div><div id="l2303" class="code_block">            <span class="n">rng</span><span class="o">.</span><span class="n">select</span><span class="p">()</span>
-</div><div id="l2304" class="code_block">            <span class="n">rng</span><span class="o">.</span><span class="n">scrollIntoView</span><span class="p">()</span>
-</div><div id="l2305" class="code_block">            <span class="k">return</span> <span class="bp">True</span>
-</div><div id="l2306" class="code_block">        <span class="k">else</span><span class="p">:</span>
-</div><div id="l2307" class="code_block">            <span class="k">return</span> <span class="bp">False</span>        
-</div><div id="l2308" class="code_block">
-</div><div id="l2309" class="code_block">
-</div><div id="l2310" class="code_block">
-</div><div id="l2311" class="code_block">      
-</div><div id="l2312" class="code_block">    <span class="c1">##  New Stuff as of Dec 2006</span>
-</div><div id="l2313" class="code_block">    <span class="k">def</span> <span class="nf">write_attrs</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</div><div id="l2314" class="code_block">        <span class="sd">&quot;&quot;&quot; WriteScript - Writes out a element attrs.</span>
-</div><div id="l2315" class="code_block"><span class="sd">            </span>
-</div><div id="l2316" class="code_block"><span class="sd">            Parmeters:</span>
-</div><div id="l2317" class="code_block"><span class="sd">                frmName - form name</span>
-</div><div id="l2318" class="code_block"><span class="sd">                frame_name - frame name defaults to none</span>
-</div><div id="l2319" class="code_block"><span class="sd">        &quot;&quot;&quot;</span>
-</div><div id="l2320" class="code_block">        
-</div><div id="l2321" class="code_block">        <span class="bp">self</span><span class="o">.</span><span class="n">_wait</span><span class="p">()</span>
-</div><div id="l2322" class="code_block">        <span class="n">items</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;select&quot;</span><span class="p">]</span>
-</div><div id="l2323" class="code_block">        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">items</span><span class="p">:</span>
-</div><div id="l2324" class="code_block">                        
-</div><div id="l2325" class="code_block">            <span class="n">doc</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ie</span><span class="o">.</span><span class="n">Document</span><span class="o">.</span><span class="n">getElementsByTagName</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
-</div><div id="l2326" class="code_block">                
-</div><div id="l2327" class="code_block">            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">doc</span><span class="o">.</span><span class="n">length</span><span class="p">):</span>
-</div><div id="l2328" class="code_block">                <span class="n">x</span> <span class="o">=</span> <span class="n">doc</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> 
-</div><div id="l2329" class="code_block">                <span class="n">etype</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="s2">&quot;type&quot;</span><span class="p">)</span>
-</div><div id="l2330" class="code_block">                <span class="c1"># Check for Name, ID or value</span>
-</div><div id="l2331" class="code_block">                <span class="n">name</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="s2">&quot;name&quot;</span><span class="p">,</span><span class="bp">None</span><span class="p">)</span>  
-</div><div id="l2332" class="code_block">                <span class="nb">id</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="s2">&quot;id&quot;</span><span class="p">,</span><span class="bp">None</span><span class="p">)</span>
-</div><div id="l2333" class="code_block">                <span class="n">value</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="s2">&quot;value&quot;</span><span class="p">,</span><span class="bp">None</span><span class="p">)</span> 
-</div><div id="l2334" class="code_block">                
-</div><div id="l2335" class="code_block">                <span class="k">if</span> <span class="n">etype</span> <span class="o">==</span>  <span class="s2">&quot;select-one&quot;</span><span class="p">:</span>
-</div><div id="l2336" class="code_block">                    <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;Type:</span><span class="si">%s</span><span class="s2">, ID:</span><span class="si">%s</span><span class="s2">, Value:</span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">etype</span><span class="p">,</span><span class="n">name</span><span class="p">,</span><span class="n">value</span><span class="p">))</span> 
-</div><div id="l2337" class="code_block">                
-</div><div id="l2338" class="code_block">                <span class="k">elif</span> <span class="n">etype</span> <span class="o">==</span>  <span class="s2">&quot;select-multiple&quot;</span><span class="p">:</span>
-</div><div id="l2339" class="code_block">                    <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;Type:</span><span class="si">%s</span><span class="s2">, ID:</span><span class="si">%s</span><span class="s2">, Value:</span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">etype</span><span class="p">,</span><span class="n">name</span><span class="p">,</span><span class="n">value</span><span class="p">))</span>
-</div><div id="l2340" class="code_block">                
-</div><div id="l2341" class="code_block">                <span class="k">else</span><span class="p">:</span>
-</div><div id="l2342" class="code_block">                    <span class="k">print</span><span class="p">(</span> <span class="s2">&quot;Type:</span><span class="si">%s</span><span class="s2">, ID:</span><span class="si">%s</span><span class="s2">, Value:</span><span class="si">%s</span><span class="s2">&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">etype</span><span class="p">,</span><span class="n">name</span><span class="p">,</span><span class="n">value</span><span class="p">))</span>
-</div><div id="l2343" class="code_block">
-</div><div id="l2344" class="code_block">
-</div><div id="l2345" class="code_block">        
-</div></pre></div>
-</td></tr></table>
-      
-    </div>
-  
-
-                    </div>
-                    
-                    
-                </div>
-            
-
-
-        </div>
-    </section>
-      
-
-<footer class="sandiego">
-    <section class="l-nav-top">
-        <nav class="row">
-            <div class="columns show-for-large large-2">
-                <a href="/about" title="About">About</a>
-                <a href="/blog/category/sitestatus/" title="Site Status">Site Status</a>
-                <a href="https://twitter.com/sfnet_ops" title="@sfnet_ops">@sfnet_ops</a>
-            </div>
-            <div class="columns show-for-large large-2">
-                
-                    <a href="/create" title="Create a Project">Create a Project</a>
-                    <a href="/directory/" title="Open Source Software Directory">Open Source Software</a>
-                    <a href="/software/" title="Business Software Directory">Business Software</a>
-                
-
-                
-                <a href="/top" title="Top Downloaded Projects">Top Downloaded Projects</a>
-                
-            </div>
-            <div class="columns show-for-large large-2">
-                <a href="/blog/" title="Blog">Blog</a>
-                <a href="https://twitter.com/sourceforge" title="@sourceforge">@sourceforge</a>
-                <a href="https://library.slashdotmedia.com/" title="Resources">Resources</a>
-            </div>
-            <div class="columns show-for-large large-2">
-                <a href="/articles/" title="Industry News">Articles</a>
-                
-                <a href="https://p.sf.net/sourceforge/docs" title="Site Documentation">Site Documentation</a>
-                
-                <a href="/support" title="Support Request">Support Request</a>
-            </div>
-
-            <div class="columns small-12 large-4 sf-logo">
-                <a href="/" title="Home" class="sf-logo">
-                    
-
-<svg  version="1.1"  xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"     viewBox="0 0 653 102.6" style="enable-background:new 0 0 653 102.6;" xml:space="preserve"><path class="st0" d="M66.9,54.5c0-19.1-6.8-27.8-10.4-31.1c-0.7-0.6-1.8-0.1-1.7,0.9c0.7,10.8-12.9,13.5-12.9,30.4h0    c0,0,0,0.1,0,0.1c0,10.3,7.8,18.7,17.4,18.7c9.6,0,17.4-8.4,17.4-18.7c0,0,0-0.1,0-0.1h0c0-4.8-1.8-9.4-3.6-12.8    c-0.4-0.7-1.4-0.4-1.3,0.2C75.1,56.7,66.9,65.7,66.9,54.5z"/><g>    <path class="st0" d="M46.2,94.8c-0.4,0-0.9-0.2-1.2-0.5L0.5,49.8c-0.6-0.6-0.6-1.7,0-2.4l47-47C47.8,0.2,48.2,0,48.6,0h13.5        c0.8,0,1.3,0.5,1.5,1c0.2,0.5,0.2,1.2-0.4,1.8L19.1,47c-0.9,0.9-0.9,2.3,0,3.2L54,85.2c0.6,0.6,0.6,1.7,0,2.4l-6.7,6.8        C47,94.6,46.6,94.8,46.2,94.8z"/></g><g>    <path class="st0" d="M55.1,102.6c-0.8,0-1.3-0.5-1.5-1c-0.2-0.5-0.2-1.2,0.4-1.8l44.2-44.2c0.4-0.4,0.7-1,0.7-1.6        c0-0.6-0.2-1.2-0.7-1.6L63.2,17.4c-0.6-0.6-0.6-1.7,0-2.4l6.8-6.8c0.3-0.3,0.7-0.5,1.2-0.5S72,8,72.3,8.3l44.4,44.5        c0.3,0.3,0.5,0.7,0.5,1.2s-0.2,0.9-0.5,1.2l-47,47c-0.3,0.3-0.7,0.5-1.2,0.5H55.1z"/></g><g>    <g>        <path class="st1" d="M167.2,32c-0.2,0.4-0.5,0.6-1,0.6c-0.3,0-0.7-0.2-1.2-0.7c-0.5-0.5-1.2-1-2-1.5c-0.9-0.6-1.9-1.1-3.2-1.5            c-1.3-0.5-2.9-0.7-4.8-0.7c-1.9,0-3.5,0.3-5,0.8c-1.4,0.5-2.6,1.3-3.6,2.2s-1.7,2-2.2,3.2c-0.5,1.2-0.8,2.5-0.8,3.8            c0,1.8,0.4,3.2,1.1,4.4c0.7,1.1,1.7,2.1,3,2.9c1.2,0.8,2.6,1.5,4.2,2c1.6,0.6,3.2,1.1,4.8,1.6c1.6,0.5,3.2,1.1,4.8,1.8            c1.6,0.6,2.9,1.5,4.2,2.4s2.2,2.2,3,3.6c0.7,1.4,1.1,3.2,1.1,5.3c0,2.2-0.4,4.2-1.1,6.1c-0.7,1.9-1.8,3.6-3.2,5            c-1.4,1.4-3.2,2.5-5.2,3.4c-2.1,0.8-4.4,1.2-7,1.2c-3.4,0-6.4-0.6-8.8-1.8c-2.5-1.2-4.6-2.9-6.5-5l1-1.6c0.3-0.4,0.6-0.5,1-0.5            c0.2,0,0.5,0.1,0.8,0.4c0.3,0.3,0.8,0.7,1.2,1.1c0.5,0.4,1.1,0.9,1.8,1.4c0.7,0.5,1.5,1,2.4,1.4c0.9,0.4,1.9,0.8,3.1,1.1            c1.2,0.3,2.5,0.4,4,0.4c2.1,0,3.9-0.3,5.5-0.9c1.6-0.6,3-1.5,4.1-2.5s2-2.4,2.6-3.8c0.6-1.5,0.9-3.1,0.9-4.7            c0-1.8-0.4-3.3-1.1-4.5c-0.7-1.2-1.7-2.2-3-3c-1.2-0.8-2.6-1.5-4.2-2c-1.6-0.5-3.2-1.1-4.8-1.6c-1.6-0.5-3.2-1.1-4.8-1.7            c-1.6-0.6-2.9-1.4-4.2-2.4c-1.2-1-2.2-2.2-3-3.7c-0.7-1.5-1.1-3.3-1.1-5.6c0-1.7,0.3-3.4,1-5c0.7-1.6,1.6-3,2.9-4.3            c1.3-1.2,2.8-2.2,4.7-3c1.9-0.7,4-1.1,6.4-1.1c2.7,0,5.1,0.4,7.3,1.3c2.1,0.9,4.1,2.2,5.9,3.9L167.2,32z"/>        <path class="st2" d="M152.9,78.8c-3.5,0-6.6-0.6-9.1-1.9c-2.5-1.2-4.8-3-6.7-5.1l-0.3-0.3l1.3-2c0.6-0.7,1.1-0.8,1.5-0.8            c0.4,0,0.8,0.2,1.2,0.6c0.3,0.3,0.8,0.7,1.3,1.1c0.5,0.4,1.1,0.9,1.7,1.4c0.7,0.5,1.4,0.9,2.3,1.3c0.9,0.4,1.9,0.8,3,1            c1.1,0.3,2.4,0.4,3.9,0.4c2,0,3.8-0.3,5.3-0.9c1.5-0.6,2.8-1.4,3.9-2.4c1-1,1.9-2.2,2.4-3.6c0.6-1.4,0.8-2.9,0.8-4.5            c0-1.7-0.3-3.1-1-4.2c-0.7-1.1-1.6-2-2.8-2.8c-1.2-0.8-2.5-1.4-4-1.9c-1.5-0.5-3.1-1.1-4.8-1.6c-1.7-0.5-3.3-1.1-4.8-1.7            c-1.6-0.7-3.1-1.5-4.3-2.5c-1.3-1-2.3-2.4-3.1-3.9c-0.8-1.6-1.2-3.5-1.2-5.8c0-1.8,0.3-3.6,1-5.3c0.7-1.7,1.7-3.2,3-4.5            c1.3-1.3,3-2.3,4.9-3.1c1.9-0.8,4.2-1.2,6.6-1.2c2.8,0,5.3,0.4,7.5,1.3c2.2,0.9,4.2,2.3,6.1,4.1l0.3,0.3l-1.1,2.1            c-0.6,1.1-1.7,1.4-3.1,0.1c-0.5-0.4-1.1-0.9-2-1.4c-0.8-0.5-1.9-1-3.1-1.5c-1.2-0.4-2.7-0.7-4.6-0.7c-1.8,0-3.4,0.3-4.8,0.8            c-1.3,0.5-2.5,1.2-3.4,2.1c-0.9,0.9-1.6,1.9-2.1,3c-0.5,1.1-0.7,2.4-0.7,3.6c0,1.6,0.3,3,1,4c0.7,1.1,1.6,2,2.8,2.8            c1.2,0.8,2.5,1.4,4,2c1.5,0.5,3.1,1.1,4.8,1.6c1.6,0.5,3.3,1.1,4.8,1.8c1.6,0.7,3.1,1.5,4.3,2.5c1.3,1,2.3,2.3,3.1,3.8            c0.8,1.5,1.2,3.4,1.2,5.6c0,2.2-0.4,4.4-1.2,6.4c-0.8,2-1.9,3.7-3.4,5.2c-1.5,1.5-3.3,2.6-5.4,3.5            C158.1,78.3,155.6,78.8,152.9,78.8z M138.4,71.3c1.7,1.9,3.7,3.4,6,4.5c2.4,1.2,5.3,1.8,8.6,1.8c2.5,0,4.8-0.4,6.8-1.2            c2-0.8,3.6-1.9,5-3.2c1.3-1.3,2.4-3,3.1-4.8c0.7-1.8,1.1-3.8,1.1-5.9c0-2-0.4-3.7-1-5.1c-0.7-1.3-1.6-2.5-2.8-3.4            c-1.2-0.9-2.5-1.7-4-2.4c-1.5-0.6-3.1-1.2-4.7-1.8c-1.6-0.5-3.2-1.1-4.8-1.6c-1.6-0.6-3-1.3-4.3-2.1c-1.3-0.8-2.3-1.9-3.1-3.1            c-0.8-1.2-1.2-2.8-1.2-4.7c0-1.4,0.3-2.8,0.8-4.1c0.5-1.3,1.3-2.5,2.3-3.4c1-1,2.3-1.8,3.8-2.3c1.5-0.6,3.3-0.8,5.2-0.8            c1.9,0,3.6,0.2,5,0.7c1.3,0.5,2.5,1,3.3,1.6c0.9,0.6,1.6,1.1,2.1,1.6c0.6,0.5,0.8,0.5,0.8,0.5c0.1,0,0.3,0,0.4-0.3l0.7-1.3            c-1.6-1.5-3.4-2.7-5.3-3.5c-2.1-0.8-4.4-1.2-7-1.2c-2.3,0-4.4,0.4-6.2,1.1c-1.8,0.7-3.3,1.7-4.5,2.8c-1.2,1.2-2.1,2.5-2.8,4.1            c-0.6,1.5-0.9,3.1-0.9,4.8c0,2.1,0.4,3.9,1.1,5.3c0.7,1.4,1.6,2.6,2.8,3.5c1.2,0.9,2.5,1.7,4,2.3c1.5,0.6,3.1,1.2,4.7,1.7            c1.6,0.5,3.2,1,4.8,1.6c1.6,0.6,3,1.2,4.3,2.1c1.3,0.8,2.4,1.9,3.1,3.2c0.8,1.3,1.2,2.9,1.2,4.9c0,1.8-0.3,3.4-0.9,5            c-0.6,1.6-1.5,2.9-2.7,4c-1.2,1.1-2.6,2-4.3,2.7c-1.7,0.6-3.6,1-5.7,1c-1.5,0-2.9-0.2-4.2-0.5c-1.2-0.3-2.3-0.7-3.2-1.1            c-0.9-0.4-1.8-0.9-2.5-1.5c-0.7-0.5-1.3-1-1.8-1.4c-0.5-0.4-0.9-0.8-1.2-1.1c-0.3-0.3-0.5-0.3-0.5-0.3c-0.1,0-0.3,0-0.5,0.3            L138.4,71.3z"/>    </g>    <g>        <path class="st1" d="M226.7,51.6c0,4-0.6,7.6-1.8,10.9c-1.2,3.3-2.9,6.1-5.1,8.4c-2.2,2.3-4.8,4.1-7.8,5.4            c-3,1.3-6.4,1.9-10.1,1.9c-3.6,0-7-0.6-10-1.9c-3-1.3-5.6-3-7.8-5.4c-2.2-2.3-3.9-5.1-5.1-8.4c-1.2-3.3-1.8-6.9-1.8-10.9            c0-4,0.6-7.6,1.8-10.9c1.2-3.3,2.9-6.1,5.1-8.4c2.2-2.3,4.8-4.1,7.8-5.4c3-1.3,6.4-1.9,10-1.9c3.7,0,7.1,0.6,10.1,1.9            c3,1.3,5.6,3,7.8,5.4c2.2,2.3,3.9,5.1,5.1,8.4C226.1,44,226.7,47.6,226.7,51.6z M222.8,51.6c0-3.6-0.5-6.9-1.5-9.8            c-1-2.9-2.4-5.3-4.2-7.3c-1.8-2-4-3.5-6.6-4.6c-2.6-1.1-5.4-1.6-8.5-1.6c-3.1,0-5.9,0.5-8.5,1.6c-2.6,1.1-4.8,2.6-6.6,4.6            c-1.8,2-3.3,4.4-4.3,7.3c-1,2.9-1.5,6.1-1.5,9.8c0,3.6,0.5,6.9,1.5,9.8c1,2.9,2.4,5.3,4.3,7.3c1.8,2,4,3.5,6.6,4.6            c2.6,1.1,5.4,1.6,8.5,1.6c3.1,0,6-0.5,8.5-1.6c2.6-1,4.8-2.6,6.6-4.6c1.8-2,3.2-4.4,4.2-7.3C222.3,58.5,222.8,55.3,222.8,51.6z"/>        <path class="st2" d="M202,78.7c-3.7,0-7.2-0.7-10.2-1.9c-3.1-1.3-5.8-3.1-8-5.5c-2.2-2.4-4-5.2-5.2-8.6c-1.2-3.3-1.9-7.1-1.9-11.1            c0-4,0.6-7.8,1.9-11.1c1.2-3.3,3-6.2,5.2-8.6c2.2-2.4,4.9-4.2,8-5.5c3.1-1.3,6.5-2,10.2-2c3.8,0,7.2,0.7,10.3,1.9            c3.1,1.3,5.8,3.1,8,5.5c2.2,2.4,4,5.3,5.2,8.6c1.2,3.3,1.8,7,1.8,11.1c0,4.1-0.6,7.8-1.8,11.1c-1.2,3.3-3,6.2-5.2,8.6            c-2.2,2.4-4.9,4.2-8,5.5C209.2,78.1,205.7,78.7,202,78.7z M202,25.7c-3.5,0-6.8,0.6-9.8,1.9c-2.9,1.2-5.5,3-7.6,5.2            c-2.1,2.2-3.8,5-4.9,8.2c-1.2,3.2-1.8,6.8-1.8,10.7c0,3.9,0.6,7.5,1.8,10.7c1.2,3.2,2.8,5.9,4.9,8.2c2.1,2.2,4.7,4,7.6,5.2            c2.9,1.2,6.2,1.8,9.8,1.8c3.6,0,6.9-0.6,9.8-1.8c2.9-1.2,5.5-3,7.6-5.2c2.1-2.2,3.8-5,4.9-8.1c1.2-3.2,1.8-6.8,1.8-10.7            c0-3.9-0.6-7.5-1.8-10.7c-1.2-3.2-2.8-5.9-4.9-8.2c-2.1-2.2-4.7-4-7.6-5.2C208.9,26.3,205.6,25.7,202,25.7z"/>    </g>    <g>        <path class="st1" d="M256.4,74.9c2.5,0,4.7-0.4,6.7-1.3c2-0.9,3.6-2.1,5-3.6c1.4-1.5,2.4-3.4,3.1-5.4c0.7-2.1,1.1-4.3,1.1-6.8            V25.7h3.7v32.1c0,2.9-0.5,5.5-1.4,8c-0.9,2.5-2.2,4.6-3.9,6.5c-1.7,1.8-3.8,3.3-6.2,4.3c-2.4,1-5.2,1.6-8.2,1.6            c-3,0-5.8-0.5-8.2-1.6c-2.4-1.1-4.5-2.5-6.2-4.3c-1.7-1.8-3-4-3.9-6.5c-0.9-2.5-1.4-5.2-1.4-8V25.7h3.8v32c0,2.4,0.4,4.7,1.1,6.8            c0.7,2.1,1.8,3.9,3.1,5.4c1.4,1.5,3,2.7,5,3.6C251.6,74.5,253.9,74.9,256.4,74.9z"/>        <path class="st2" d="M256.4,78.8c-3.1,0-5.9-0.5-8.4-1.6c-2.5-1.1-4.7-2.6-6.4-4.5c-1.7-1.9-3.1-4.2-4-6.7            c-0.9-2.5-1.4-5.3-1.4-8.2V25.1h5v32.7c0,2.3,0.4,4.5,1,6.6c0.7,2,1.7,3.8,3,5.2c1.3,1.5,2.9,2.6,4.8,3.5c1.9,0.8,4,1.3,6.4,1.3            c2.4,0,4.6-0.4,6.4-1.2c1.9-0.8,3.5-2,4.8-3.5c1.3-1.5,2.3-3.2,3-5.2c0.7-2,1-4.2,1-6.6V25.1h5v32.7c0,2.9-0.5,5.7-1.4,8.2            c-0.9,2.5-2.3,4.8-4,6.7c-1.7,1.9-3.9,3.4-6.4,4.5C262.3,78.3,259.5,78.8,256.4,78.8z M237.3,26.3v31.5c0,2.8,0.4,5.4,1.3,7.8            c0.9,2.4,2.1,4.5,3.8,6.3c1.6,1.8,3.6,3.2,6,4.2c2.3,1,5,1.5,8,1.5c2.9,0,5.6-0.5,8-1.5c2.3-1,4.4-2.4,6-4.2            c1.6-1.8,2.9-3.9,3.8-6.3c0.9-2.4,1.3-5,1.3-7.8V26.3h-2.5v31.5c0,2.5-0.4,4.8-1.1,7c-0.7,2.2-1.8,4.1-3.3,5.7            c-1.4,1.6-3.2,2.9-5.2,3.8c-2,0.9-4.4,1.4-6.9,1.4c-2.6,0-4.9-0.5-6.9-1.4c-2-0.9-3.8-2.2-5.2-3.8c-1.4-1.6-2.5-3.5-3.2-5.7            c-0.7-2.1-1.1-4.5-1.1-7V26.3H237.3z"/>    </g>    <g>        <path class="st1" d="M297.5,51.3c1,0,0.9,0,0.9,0l2.2,0c2.3,0,4.4-0.3,6.2-0.8c1.8-0.6,3.4-1.3,4.6-2.4c1.3-1,2.2-2.3,2.9-3.7            c0.7-1.4,1-3.1,1-4.9c0-3.7-1.2-6.4-3.6-8.2c-2.4-1.8-5.9-2.7-10.6-2.7h-9.5v22.7v2.8v23.5h-3.7V25.7h13.2c6,0,10.5,1.2,13.4,3.5            c3,2.3,4.4,5.7,4.4,10.2c0,2-0.3,3.8-1,5.4c-0.7,1.6-1.7,3.1-3,4.3c-1.3,1.2-2.8,2.3-4.6,3c-1.8,0.8-3.9,1.3-6.1,1.6            c0.6,0.4,1.1,0.9,1.6,1.5l17.9,22.4h-3.3c-0.4,0-0.7-0.1-1-0.2c-0.3-0.1-0.6-0.4-0.8-0.7l-16.6-21c-0.4-0.5-0.9-0.9-1.3-1.1            c-0.5-0.2-3.4-0.3-4.4-0.3C296.3,51.6,296.7,51.3,297.5,51.3z"/>        <path class="st2" d="M325,78.2h-4.5c-0.5,0-0.9-0.1-1.3-0.3c-0.4-0.2-0.7-0.5-1-0.9l-16.6-21c-0.4-0.5-0.7-0.8-1.1-1            c-0.4-0.1-2.8-0.3-4.1-0.3h-0.6v-2.6c0-0.9,0.2-1.4,1.8-1.4c0.9,0,1,0,1,0l2.2,0c2.2,0,4.2-0.3,6-0.8c1.7-0.5,3.2-1.3,4.4-2.3            c1.2-1,2.1-2.1,2.7-3.5c0.6-1.4,0.9-2.9,0.9-4.6c0-3.5-1.1-6-3.4-7.7c-2.3-1.7-5.7-2.6-10.2-2.6h-8.9v48.9h-5V25.1h13.9            c6.1,0,10.7,1.2,13.8,3.6c3.1,2.4,4.7,6,4.7,10.7c0,2.1-0.4,4-1.1,5.7c-0.7,1.7-1.8,3.2-3.1,4.5c-1.3,1.3-3,2.3-4.8,3.2            c-1.5,0.6-3.1,1.1-4.9,1.4c0.2,0.2,0.4,0.4,0.6,0.7L325,78.2z M296.9,53.5c1.1,0,3.4,0.1,4,0.4c0.6,0.3,1.1,0.7,1.6,1.3l16.6,21            c0.2,0.3,0.4,0.5,0.6,0.6c0.2,0.1,0.4,0.2,0.7,0.2h2l-17.1-21.4c-0.4-0.6-0.9-1-1.4-1.3l-1.5-0.9l1.8-0.2c2.2-0.2,4.2-0.7,5.9-1.5            c1.7-0.8,3.2-1.7,4.5-2.9c1.2-1.2,2.2-2.5,2.8-4.1c0.6-1.6,1-3.3,1-5.2c0-4.3-1.4-7.5-4.2-9.7c-2.8-2.2-7.2-3.3-13-3.3h-12.6V77            h2.5V28h10.1c4.7,0,8.4,0.9,10.9,2.8c2.6,1.9,3.9,4.8,3.9,8.7c0,1.9-0.4,3.6-1,5.1c-0.7,1.5-1.7,2.8-3.1,3.9            c-1.3,1.1-2.9,1.9-4.8,2.5c-1.9,0.6-4,0.9-6.4,0.9l-2.2,0c-0.1,0-0.2,0-0.9,0C297.3,51.9,297,51.9,296.9,53.5z"/>    </g>    <g>        <path class="st1" d="M367.6,68.8c0.2,0,0.5,0.1,0.6,0.3l1.5,1.6c-1.1,1.1-2.2,2.2-3.5,3.1c-1.3,0.9-2.7,1.7-4.2,2.3            c-1.5,0.6-3.2,1.1-4.9,1.5c-1.8,0.4-3.8,0.5-5.9,0.5c-3.6,0-6.9-0.6-9.9-1.9c-3-1.3-5.6-3-7.7-5.4c-2.1-2.3-3.8-5.1-5-8.4            c-1.2-3.3-1.8-6.9-1.8-10.9c0-3.9,0.6-7.5,1.9-10.8c1.2-3.3,3-6,5.2-8.4c2.2-2.3,4.9-4.1,8-5.4c3.1-1.3,6.6-1.9,10.3-1.9            c1.9,0,3.6,0.1,5.2,0.4c1.6,0.3,3,0.7,4.4,1.2c1.4,0.5,2.6,1.2,3.8,2c1.2,0.8,2.4,1.7,3.5,2.7l-1.1,1.6c-0.2,0.3-0.5,0.4-0.9,0.4            c-0.2,0-0.5-0.1-0.8-0.4c-0.3-0.3-0.8-0.6-1.3-1c-0.5-0.4-1.2-0.8-1.9-1.2c-0.7-0.5-1.6-0.9-2.7-1.2c-1-0.4-2.2-0.7-3.6-1            c-1.3-0.3-2.9-0.4-4.6-0.4c-3.2,0-6.1,0.5-8.7,1.6c-2.6,1.1-4.9,2.6-6.8,4.7c-1.9,2-3.4,4.5-4.5,7.3s-1.6,6.1-1.6,9.7            c0,3.7,0.5,6.9,1.6,9.8c1.1,2.9,2.5,5.3,4.4,7.3c1.9,2,4.1,3.5,6.6,4.6c2.5,1.1,5.3,1.6,8.2,1.6c1.9,0,3.5-0.1,5-0.4            c1.5-0.2,2.8-0.6,4-1.1c1.2-0.5,2.4-1.1,3.4-1.8c1.1-0.7,2.1-1.5,3.1-2.5c0.1-0.1,0.2-0.2,0.3-0.2            C367.3,68.9,367.5,68.8,367.6,68.8z"/>        <path class="st2" d="M351.1,78.8c-3.7,0-7.1-0.7-10.1-1.9c-3.1-1.3-5.7-3.1-7.9-5.5c-2.2-2.4-3.9-5.2-5.1-8.6            c-1.2-3.3-1.8-7.1-1.8-11.1c0-4,0.6-7.7,1.9-11c1.3-3.3,3.1-6.2,5.3-8.6c2.3-2.4,5.1-4.3,8.2-5.6c3.2-1.3,6.7-2,10.6-2            c1.9,0,3.7,0.1,5.3,0.4c1.6,0.3,3.1,0.7,4.5,1.2c1.4,0.5,2.7,1.2,3.9,2c1.2,0.8,2.4,1.7,3.6,2.8l0.4,0.4l-1.4,2.1            c-0.2,0.3-0.6,0.7-1.4,0.7c-0.4,0-0.7-0.2-1.2-0.5c-0.3-0.3-0.8-0.6-1.3-0.9c-0.5-0.4-1.1-0.8-1.9-1.2c-0.7-0.4-1.6-0.8-2.6-1.2            c-1-0.4-2.2-0.7-3.5-0.9c-1.3-0.2-2.8-0.4-4.5-0.4c-3.1,0-5.9,0.5-8.5,1.6c-2.5,1.1-4.8,2.6-6.6,4.5c-1.8,1.9-3.3,4.3-4.3,7.1            c-1,2.8-1.6,6-1.6,9.4c0,3.6,0.5,6.8,1.5,9.6c1,2.8,2.4,5.2,4.2,7.1c1.8,1.9,3.9,3.4,6.4,4.4c2.4,1,5.1,1.5,8,1.5            c1.8,0,3.5-0.1,4.9-0.4c1.4-0.2,2.7-0.6,3.9-1.1c1.2-0.5,2.3-1.1,3.3-1.7c1-0.7,2-1.5,3-2.4c0.2-0.2,0.3-0.2,0.5-0.3            c0.5-0.3,1.3-0.2,1.7,0.3l1.9,2l-0.4,0.4c-1.1,1.2-2.3,2.2-3.6,3.2c-1.3,0.9-2.7,1.8-4.3,2.4c-1.5,0.7-3.2,1.2-5.1,1.5            C355.3,78.6,353.3,78.8,351.1,78.8z M352.2,25.7c-3.7,0-7.1,0.6-10.1,1.9c-3,1.2-5.7,3-7.8,5.3c-2.2,2.3-3.9,5-5.1,8.2            c-1.2,3.2-1.8,6.7-1.8,10.6c0,3.9,0.6,7.5,1.8,10.7c1.2,3.2,2.8,5.9,4.9,8.2c2.1,2.2,4.6,4,7.5,5.2c2.9,1.2,6.1,1.8,9.6,1.8            c2.1,0,4-0.2,5.8-0.5c1.7-0.3,3.4-0.8,4.8-1.5c1.5-0.6,2.8-1.4,4-2.3c1.1-0.8,2.1-1.7,3-2.6l-1.1-1.2c-0.1-0.1-0.2-0.1-0.3,0            c-0.1,0-0.2,0.1-0.3,0.2c-1,0.9-2.1,1.8-3.2,2.5c-1.1,0.7-2.3,1.4-3.5,1.9c-1.3,0.5-2.7,0.9-4.1,1.1c-1.5,0.2-3.2,0.4-5.1,0.4            c-3,0-5.9-0.6-8.5-1.6c-2.6-1.1-4.9-2.7-6.8-4.7c-1.9-2-3.4-4.6-4.5-7.5c-1.1-2.9-1.6-6.3-1.6-10c0-3.6,0.5-6.9,1.6-9.9            c1.1-2.9,2.6-5.5,4.6-7.5c2-2.1,4.3-3.7,7-4.8c2.7-1.1,5.7-1.7,8.9-1.7c1.7,0,3.3,0.1,4.7,0.4c1.4,0.3,2.6,0.6,3.7,1            c1.1,0.4,2,0.8,2.8,1.3c0.8,0.5,1.4,0.9,1.9,1.3c0.5,0.4,1,0.7,1.3,1c0.3,0.3,0.5,0.3,0.5,0.3c0.3,0,0.4-0.1,0.4-0.2l0.8-1.2            c-1-0.9-2-1.6-3-2.3c-1.2-0.8-2.4-1.4-3.7-1.9c-1.3-0.5-2.8-0.9-4.3-1.2C355.7,25.9,354,25.7,352.2,25.7z"/>    </g>    <g>        <path class="st1" d="M410.3,25.7v3.1H383v21h22.7v3H383v21.6h27.3v3.1h-31.1V25.7H410.3z"/>        <path class="st2" d="M410.9,78.2h-32.3V25.1h32.3v4.3h-27.3v19.7h22.7v4.3h-22.7v20.4h27.3V78.2z M379.8,77h29.9v-1.9h-27.3V52.2            h22.7v-1.8h-22.7V28.2h27.3v-1.9h-29.9V77z"/>    </g>    <g>        <path class="st1" d="M456.8,25.1V33h-23.5v15.7h19.8v7.9h-19.8v21.6h-9.9v-53H456.8z"/>    </g>    <g>        <path class="st1" d="M514.3,51.6c0,3.9-0.6,7.5-1.9,10.8c-1.3,3.3-3.1,6.2-5.5,8.6c-2.3,2.4-5.2,4.3-8.5,5.7c-3.3,1.4-7,2-11,2            c-4,0-7.7-0.7-11-2c-3.3-1.4-6.1-3.2-8.5-5.7c-2.4-2.4-4.2-5.3-5.5-8.6s-1.9-6.9-1.9-10.8s0.6-7.5,1.9-10.8            c1.3-3.3,3.1-6.2,5.5-8.6c2.4-2.4,5.2-4.3,8.5-5.7c3.3-1.4,7-2,11-2c4,0,7.7,0.7,11,2.1c3.3,1.4,6.1,3.3,8.5,5.7            c2.3,2.4,4.2,5.3,5.5,8.6C513.6,44.1,514.3,47.7,514.3,51.6z M504.2,51.6c0-2.9-0.4-5.5-1.2-7.8c-0.8-2.3-1.9-4.3-3.3-5.9            c-1.4-1.6-3.2-2.8-5.3-3.7c-2.1-0.9-4.4-1.3-7-1.3c-2.6,0-4.9,0.4-7,1.3c-2.1,0.9-3.8,2.1-5.3,3.7c-1.5,1.6-2.6,3.6-3.4,5.9            c-0.8,2.3-1.2,4.9-1.2,7.8s0.4,5.5,1.2,7.8c0.8,2.3,1.9,4.3,3.4,5.9c1.5,1.6,3.2,2.8,5.3,3.7c2.1,0.9,4.4,1.3,7,1.3            c2.6,0,4.9-0.4,7-1.3c2.1-0.9,3.8-2.1,5.3-3.7c1.4-1.6,2.5-3.6,3.3-5.9C503.8,57.1,504.2,54.5,504.2,51.6z"/>    </g>    <g>        <path class="st1" d="M534.9,50.4l2.3,0c1.9,0,3.5-0.2,4.9-0.7c1.4-0.5,2.5-1.1,3.4-1.9c0.9-0.8,1.6-1.8,2-2.9            c0.4-1.1,0.7-2.4,0.7-3.7c0-2.7-0.9-4.8-2.7-6.2c-1.8-1.4-4.5-2.2-8.1-2.2H531v17.6v7.1v20.7h-9.9v-53h16.2c3.6,0,6.7,0.4,9.3,1.1            c2.6,0.7,4.7,1.8,6.3,3.1c1.6,1.3,2.9,3,3.6,4.8c0.8,1.9,1.2,3.9,1.2,6.2c0,1.8-0.3,3.5-0.8,5.1c-0.5,1.6-1.3,3-2.3,4.3            c-1,1.3-2.2,2.4-3.7,3.4c-1.5,1-3.1,1.8-5,2.3c1.2,0.7,2.3,1.7,3.2,3l13.3,19.6h-8.9c-0.9,0-1.6-0.2-2.2-0.5            c-0.6-0.3-1.1-0.8-1.5-1.5c0,0-11.1-17-11.1-17c-0.3-0.4-0.9-1.3-1.5-1.4c-1.2,0-2.4,0-3.5,0c0,0,0-6,0-6.4            C533.8,50.4,534.9,50.4,534.9,50.4z"/>    </g>    <g>        <path class="st1" d="M591.4,70.9c2.2,0,4.2-0.2,5.8-0.6c1.6-0.4,3.2-1,4.7-1.7v-12h-6.6c-0.6,0-1.1-0.2-1.5-0.5            c-0.4-0.4-0.6-0.8-0.6-1.3v-5.6h17.6V73c-1.3,1-2.7,1.8-4.2,2.5c-1.5,0.7-3,1.3-4.7,1.8c-1.7,0.5-3.4,0.8-5.3,1            c-1.9,0.2-3.9,0.3-6.1,0.3c-3.9,0-7.4-0.7-10.7-2c-3.3-1.3-6.1-3.2-8.4-5.6c-2.4-2.4-4.2-5.3-5.6-8.6c-1.3-3.3-2-7-2-10.9            c0-4,0.6-7.6,1.9-11c1.3-3.3,3.1-6.2,5.5-8.6c2.4-2.4,5.3-4.3,8.7-5.6c3.4-1.3,7.2-2,11.4-2c4.3,0,8.1,0.6,11.2,1.9            c3.2,1.3,5.8,3,8,5l-2.9,4.5c-0.6,0.9-1.3,1.4-2.2,1.4c-0.6,0-1.2-0.2-1.8-0.6c-0.8-0.5-1.6-0.9-2.4-1.4c-0.8-0.5-1.7-0.9-2.7-1.2            c-1-0.3-2.1-0.6-3.3-0.8c-1.2-0.2-2.7-0.3-4.3-0.3c-2.6,0-5,0.4-7.1,1.3c-2.1,0.9-3.9,2.1-5.4,3.8c-1.5,1.6-2.6,3.6-3.4,5.9            c-0.8,2.3-1.2,4.9-1.2,7.7c0,3.1,0.4,5.8,1.3,8.2c0.9,2.4,2.1,4.4,3.6,6s3.4,2.9,5.5,3.8S588.9,70.9,591.4,70.9z"/>    </g>    <g>        <path class="st1" d="M645.7,56.8h-16.1v13.4H653v7.9h-33.4v-53H653V33h-23.5v16.3H648v5.8C648,55.1,647.9,56.8,645.7,56.8z"/>    </g></g></svg>
-                </a>
-            </div>
-        </nav>
-    </section>
-
-    <section class="l-nav-bottom">
-        <nav class="row">
-            <div class="columns small-12 large-6 copyright-notice">&copy; 2019 Slashdot Media. All Rights Reserved.</div>
-            <div class="columns large-6 links">
-                <span class="show-for-large">
-                    <a href="http://slashdotmedia.com/terms-of-use" title="Terms">Terms</a>
-                    <a href="http://slashdotmedia.com/privacy-statement/" title="Privacy">Privacy</a>
-                </span>
-                <span id='teconsent'></span>
-                
-                <span class="show-for-large">
-                    <a href="http://slashdotmedia.com/opt-out-choices" title="Opt Out">Opt Out</a>
-                    <a href="http://slashdotmedia.com/" title="Advertise">Advertise</a>
-                </span>
-            </div>
-        </nav>
-    </section>
-</footer>
-
-
-<div id="l-no-css" style="font-family:sans-serif;width:100%;font-size:2em;background:#fff;color:#ff3300;padding:2rem;border:1px solid #ff3300;position:absolute;top: 0;left:0;box-sizing: border-box;">
-    Oh no! Some styles failed to load. Please try reloading this page, or <a href="/support" target="_blank" style="color:#0099cc;">contact support</a>.
-</div>
-<script>
-
-document.addEventListener('DOMContentLoaded', function () {
-    var hasCSS = window.getComputedStyle(document.querySelector('#l-no-css')).display === 'none';
-    if(!hasCSS) {
-        var svgs = document.querySelectorAll('svg');
-        for (var x=0; x<svgs.length; x++){
-            svgs[x].style.display = 'none';
-        }
-        window.scroll(0, 0);  
-    }
-});
-</script>
-
-
-
-
-    
-<div id="newsletter-floating" class="sandiego">
-    <h2>Get latest updates about Open Source Projects, Conferences and News.</h2>
-    <a class="button blue" href="/user/newsletters?source=floating">Sign Up</a>
-    <a id="btn-float-close">No, Thank you</a>
-</div>
-
-
-
-
-
-</div>
-
-
-<div id="messages">
-    
-</div>
-
-
-    <!-- ew:body_js -->
-
-
-    <script type="text/javascript" src="https://a.fsdn.com/allura/nf/1556127879/_ew_/_slim/js?href=allura%2Fjs%2Fjquery.notify.js%3Ballura%2Fjs%2Fjquery.tooltipster.js%3Ballura%2Fjs%2Fsylvester.js%3Ballura%2Fjs%2Ftwemoji.min.js%3Ballura%2Fjs%2Fpb.transformie.min.js%3Ballura%2Fjs%2Fallura-base.js%3Ballura%2Fjs%2Fchecklist.js%3Ballura%2Fjs%2Fadmin_modal.js%3Bjs%2Fjquery.lightbox_me.js%3Ballura%2Fjs%2Fmemorable.js%3Btheme%2Fsftheme%2Fjs%2Fsftheme%2Fshared.js%3Btheme%2Fsftheme%2Fjs%2Fsftheme%2Fsticky.js%3Btheme%2Fsftheme%2Fjs%2Fsftheme%2Fvendor%2Faudero-sticky.min.js%3Btheme%2Fsftheme%2Fjs%2Fsftheme%2Fsandiego%2Fchrome.js%3Btheme%2Fsftheme%2Fjs%2Fsftheme%2Fsandiego%2Futilities.js%3Btheme%2Fsftheme%2Fjs%2Fsftheme%2Fvendor%2Ffoundation6%2Fplugins%2Ffoundation.core.min.js%3Btheme%2Fsftheme%2Fjs%2Fsftheme%2Fvendor%2Ffoundation6%2Fplugins%2Ffoundation.util.mediaQuery.min.js%3Btheme%2Fsftheme%2Fjs%2Fsftheme%2Fvendor%2Ffoundation6%2Fplugins%2Ffoundation.util.keyboard.min.js%3Btheme%2Fsftheme%2Fjs%2Fsftheme%2Fvendor%2Ffoundation6%2Fplugins%2Ffoundation.util.box.min.js%3Btheme%2Fsftheme%2Fjs%2Fsftheme%2Fvendor%2Ffoundation6%2Fplugins%2Ffoundation.util.nest.min.js%3Btheme%2Fsftheme%2Fjs%2Fsftheme%2Fvendor%2Ffoundation6%2Fplugins%2Ffoundation.dropdownMenu.min.js%3Btheme%2Fsftheme%2Fjs%2Fsftheme%2Fvendor%2Ffoundation6%2Fplugins%2Ffoundation.offcanvas.min.js%3Btheme%2Fsftheme%2Fjs%2Fsftheme%2Fsandiego%2Fproject.js%3Btheme%2Fsftheme%2Fjs%2Fsftheme%2Fvendor%2Fjquery.typeahead.min.js%3Ballura%2Fjs%2Fmaximize-content.js"></script>
-
-    
-<!-- /ew:body_js -->
-
-
-
-    <!-- ew:body_js_tail -->
-
-
-    
-<!-- /ew:body_js_tail -->
-
-
-
-
-<script type="text/javascript">(function() {
-  $('#access_urls .btn').click(function(evt){
-    evt.preventDefault();
-    var parent = $(this).parents('.btn-bar');
-    var checkout_cmd = $(this).attr('data-url');
-    $(parent).find('input').val(checkout_cmd);
-    $(parent).find('span').text($(this).attr('title')+' access');
-    $(this).parent().children('.btn').removeClass('active');
-    $(this).addClass('active');
-    if (checkout_cmd.indexOf(' http://') !== -1 || checkout_cmd.indexOf(' https://') !== -1 ) {
-      $('#http-2fa-msg').show();
-    } else {
-      $('#http-2fa-msg').hide();
-    }
-  });
-  $('#access_urls .btn').first().click();
-
-  
-  var repo_status = document.getElementById('repo_status');
-  // The repo_status div will only be present if repo.status != 'ready'
-  if (repo_status) {
-    $('.spinner').show()
-    var delay = 500;
-    function check_status() {
-        $.get('/p/pamie/code/status', function(data) {
-            if (data.status === 'ready') {
-                $('.spinner').hide()
-                $('#repo_status h2').html('Repo status: ready. <a href=".">Click here to refresh this page.</a>');
-            }
-            else {
-                $('#repo_status h2 span').html(data.status);
-                if (delay < 60000){
-                    delay = delay * 2;
-                }
-                window.setTimeout(check_status, delay);
-            }
-        });
-    }
-    var status_checker = window.setTimeout(check_status, delay);
-    
-  }
-}());
-</script>
-
-<script type="text/javascript">(function() {
-  $(window).bind('hashchange', function(e) {
-    var hash = window.location.hash.substring(1);
-	if ('originalEvent' in e && 'oldURL' in e.originalEvent) {
-      $('#' + e.originalEvent.oldURL.split('#')[1]).css('background-color', 'transparent');
-	}
-    if (hash !== '' && hash.substring(0, 1) === 'l' && !isNaN(hash.substring(1))) {
-      $('#' + hash).css('background-color', '#ffff99');
-    }
-  }).trigger('hashchange');
-
-  var clicks = 0;
-  $('.code_block').each(function(index, element) {
-    $(element).bind('click', function() {
-      // Trick to ignore double and triple clicks
-      clicks++;
-      if (clicks == 1) {
-        setTimeout(function() {
-          if (clicks == 1) {
-            var hash = window.location.hash.substring(1);
-            if (hash !== '' && hash.substring(0, 1) === 'l' && !isNaN(hash.substring(1))) {
-              $('#' + hash).css('background-color', 'transparent');
-            }
-            $(element).css('background-color', '#ffff99');
-            window.location.href = '#' + $(element).attr('id');
-          };
-          clicks = 0;
-        }, 500);
-      };
-    });
-  });
-}());
-</script>
-
-
-    
-
-
-    
-    
-    <noscript><p><img src="//analytics.slashdotmedia.com/sf.php?idsite=39" style="border:0;" alt="" /></p></noscript>
-    
-    <script>
-        $(document).foundation();
-    </script>
-    
-
-
-
-
-
-
-
-
-
-<script>
-    $(document).ready(function () {
-        $(".tooltip, .m-tooltip").tooltipster({
-            animation: 'fade',
-            delay: 200,
-            theme: 'tooltipster-light',
-            trigger: 'hover',
-            position: 'right',
-            iconCloning: false,
-            maxWidth: 300
-        }).focus(function () {
-            $(this).tooltipster('show');
-        }).blur(function () {
-            $(this).tooltipster('hide');
-        });
-
-    });
-</script>
-</body>
-</html>
