@@ -23,7 +23,7 @@ def compare_image(img1, img2):
 
     # compute the Structural Similarity Index (SSIM) between the two
     # images, ensuring that the difference image is returned
-    (diff) = compare_ssim(grayA, grayB, full=True)
+    (score, diff) = compare_ssim(grayA, grayB, full=True)
     diff = (diff * 255).astype("uint8")
 
 
@@ -49,7 +49,12 @@ def compare_image(img1, img2):
     cv2.imshow("Modified", imageB)
     cv2.waitKey(0)
 
-# Example find what is missing from the aws website snapshot
-img1 = "../images/aws1.png"
-img2 = "../images/aws2.png"
+
+# These can be any image
+# original image - baseline (snapshot from selenium webdriver)
+# This image will be highlights to show what was originally there
+img1 = "images/aws1.png"
+
+# modified image to simulate show missing areas
+img2 = "images/aws2.png"
 compare_image(img1, img2)
