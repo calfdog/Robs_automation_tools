@@ -41,8 +41,8 @@ def compare_image(img1, img2):
         # bounding box on both input images
 
         (x, y, w, h) = cv2.boundingRect(c)
-        cv2.rectangle(imageA, (x, y), (x + w, y + h), (0, 255, 0), 2)
-        cv2.rectangle(imageB, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        cv2.rectangle(imageA, (x, y), (x + w, y + h), (0, 0, 255), 2)
+        cv2.rectangle(imageB, (x, y), (x + w, y + h), (0, 0, 255), 2)
 
     # show the output images
     cv2.imshow("Original", imageA)
