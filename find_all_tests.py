@@ -1,14 +1,14 @@
 """
 Rob Marchetti
 Description: recursively find all python test_ file names and get the total count
-Example: Find all python "test_*" files under the your project directory
+Example: Find all python "test_*" files under the your project or test directory
 """
 
 from pathlib import Path
 import os
 
 
-all_py_files = Path(r"{YourTestDirectory}").rglob("test_*.py")
+all_py_files = Path(r"{YourProjectDirectory}").rglob("test_*.py")
 
 test_count = 0
 all_test_paths = [tests for tests in all_py_files]
