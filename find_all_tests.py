@@ -11,8 +11,7 @@ import os
 all_py_files = Path(r"{YourProjectDirectory}").rglob("test_*.py")
 
 test_count = 0
-all_test_paths = [tests for tests in all_py_files]
-test_paths = [os.path.split(paths) for paths in all_test_paths]
+test_paths = [os.path.split(paths) for paths in all_py_files]
 
 for test_name in test_paths:
     print(f"test name: {test_name[1]}")
