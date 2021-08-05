@@ -1,1 +1,1 @@
-This repo is for some useful tools I have developed as helpers for automation.
+This repo is for some simple tools I have developed as helpers for automating things.
