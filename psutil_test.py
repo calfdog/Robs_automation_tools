@@ -2,8 +2,6 @@
 
 import psutil
 
-
-
 # Print a list of pid's and names
 process = psutil.process_iter()
 for i in process:
