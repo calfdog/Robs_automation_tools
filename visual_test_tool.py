@@ -11,13 +11,16 @@
     pip install scikit-image
     pip install opencv-python
     pip install numpy
-
+    pip install pytesseract
 
 """
 
 from skimage.metrics import structural_similarity
 import imutils
 import cv2
+import pytesseract
+
+
 
 
 def compare_image(img1, img2):
@@ -66,3 +69,8 @@ img1 = "images/aws1.png"
 # modified image to simulate show missing areas
 img2 = "images/aws2.png"
 compare_image(img1, img2)
+
+# Press escape to close open image windows
+k = cv2.waitKey(0) & 0xFF
+if k == 27:  # close on ESC key
+    cv2.destroyAllWindows()
