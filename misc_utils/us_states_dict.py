@@ -18,12 +18,12 @@ class USStates:
             and states(key abbreviations(value)
         """
 
-        with open("data/states_data.txt", "r") as states:
+        with open("../data/states_data.txt", "r") as states:
             us_states = []
             for state in states:
                 us_states.append(state.strip())
 
-        with open("data/states_abv.txt", "r") as states_abv:
+        with open("../data/states_abv.txt", "r") as states_abv:
             us_states_abv = []
             for state in states_abv:
                 us_states_abv.append(state.strip())
@@ -34,7 +34,7 @@ class USStates:
     @staticmethod
     def get_random_us_state():
         """return a random state"""
-        with open("data/states_data.txt", "r") as states:
+        with open("../data/states_data.txt", "r") as states:
             us_states = []
             for state in states:
                 us_states.append(state.strip())
