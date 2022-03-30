@@ -8,17 +8,16 @@ from pprint import pprint
 from time import gmtime, strftime
 
 
+def get_forecast(point):
+    """Gets the weather forecast based on location (point) using a lat/lon."""
 
-
-def get_forecast(location):
-    """Gets the weather forecast based on location using a lat/lon."""
-
-    url = f'https://api.weather.gov/points/{location}'
+    url = f'https://api.weather.gov/points/{point}'
     res = requests.get(url)
 
     # Json data
     data = res.json()
 
+    print(data['@context'])
     # Get the City - will print out later
     city = data['properties']['relativeLocation']['properties']['city']
     # Get the State
