@@ -759,7 +759,7 @@ class PAMIE:
         """ Set the config path"""
 
         pathname = os.path.dirname(sys.argv[0])
-        pathname = os.chdir('..')
+        pathname = os.chdir('../..')
         path = os.path.abspath(pathname)
         path = path + cfpath
         return path
