@@ -29,6 +29,7 @@ def test_paste_to_notepad():
     pyperclip.copy(notepad_txt)
     # paste text into notepad from clipboard
     autoit.control_send("[CLASS:Notepad]", "Edit1", pyperclip.paste())
+    #ControlSend("[CLASS:Notepad; Title:Untitled - Notepad]", "", "[CLASS:Edit; INSTANCE:1]", "l")
     time.sleep(2)
     # Close notepad, this will bring up the save dialog
     autoit.win_close("[CLASS:Notepad]")
@@ -39,3 +40,6 @@ def test_paste_to_notepad():
 
     # Verify what was pasted matches
     assert notepad_txt == pyperclip.paste()
+
+
+test_paste_to_notepad()
