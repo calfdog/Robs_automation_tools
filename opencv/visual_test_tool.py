@@ -53,24 +53,27 @@ def compare_image(img1, img2):
         (x, y, w, h) = cv2.boundingRect(c)
         cv2.rectangle(imageA, (x, y), (x + w, y + h), (0, 0, 255), 2)
         cv2.rectangle(imageB, (x, y), (x + w, y + h), (0, 0, 255), 2)
+        cv2.putText(imageB, 'Missing', (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
     # Display the output images
     cv2.imshow("Original", imageA)
     cv2.imshow("Modified", imageB)
     # waitKey(0) will display the window infinitely until any keypress (it is suitable for image display).
+    # Move img to open on the top left
+    cv2.moveWindow("Original", 0, 0)
+    cv2.moveWindow("Modified", 100, 0)
     cv2.waitKey(0)
 
 
 # These can be any image
 # original image - baseline (sample snapshot)
 # This image will be highlights to show what was originally there
-img1 = "images/aws1.png"
+img1 = "images/imageA.jpg"
 
 # modified image to simulate show missing areas
-img2 = "images/aws2.png"
+img2 = "images/imageB.jpg"
 compare_image(img1, img2)
 
 # Press escape to close open image windows
-k = cv2.waitKey(0) & 0xFF
-if k == 27:  # close on ESC key
-    cv2.destroyAllWindows()
+cv2.waitKey(0)
+cv2.destroyAllWindows()
