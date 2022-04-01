@@ -4,7 +4,7 @@
 """
 
 from playwright.sync_api import sync_playwright
-import name_gen
+from misc_utils import name_gen
 
 
 def main():
