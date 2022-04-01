@@ -1,5 +1,6 @@
 """ Simple Playwright demo by Rob Marchetti
-    It fills out a dummy Registration Form
+    It fills in login and click login button then validates
+    secure page
 
 """
 
@@ -10,18 +11,17 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
         page = browser.new_page()
+        # Navigate to login page
         page.goto('http://the-internet.herokuapp.com/login')
-        page.wait_for_timeout(2000)
         #  login
-        page.fill('input[name="username"]', 'tomsmith')
-        page.fill('input[name="password"]', 'SuperSecretPassword!')
+        # Enter username
+        page.fill('input[id="username"]', 'tomsmith')
+        # Enter password
+        page.fill('input[id="password"]', 'SuperSecretPassword!')
+        # Click login button
+        page.locator("button").click()
 
-        #class ="fa fa-2x fa-sign-in"
-        # verify
-
-
-
-
+        # TO DO: Validate Text on next page - http://the-internet.herokuapp.com/secure
 
 
 if __name__ == '__main__':
